@@ -34,24 +34,28 @@
             <%= cond do %>
               <% @name != nil -> %>
                 <!-- On Schedule Page: Show back to namespace button -->
-                <h3 class="font-semibold text-gray-700 mb-3 text-center">Navigation</h3>
+                <h3 class="font-semibold text-gray-700 mb-3 text-center">
+                  Schedule: {String.capitalize(@name)}
+                </h3>
                 <.link
                   navigate={~p"/#{@namespace}"}
                   class="flex text-gray-800 hover:text-black px-3 py-2 rounded-xl transition-all duration-200 bg-purple-50 bg-opacity-70 hover:bg-opacity-100 text-sm truncate shadow-sm hover:shadow border-l-2 border-purple-400 mb-2"
                 >
                   <span class="truncate flex items-center">
-                    <span class="mr-1">↩</span> Back to {String.capitalize(@namespace)}
+                    <span class="mr-1">↩</span> to {String.capitalize(@namespace)}
                   </span>
                 </.link>
               <% @namespace != nil -> %>
                 <!-- On Namespace Page: Show back to all button -->
-                <h3 class="font-semibold text-gray-700 mb-3 text-center">Navigation</h3>
+                <h3 class="font-semibold text-gray-700 mb-3 text-center">
+                  Namespace: {String.capitalize(@namespace)}
+                </h3>
                 <.link
                   navigate={~p"/"}
                   class="flex text-gray-800 hover:text-black px-3 py-2 rounded-xl transition-all duration-200 bg-purple-50 bg-opacity-70 hover:bg-opacity-100 text-sm truncate shadow-sm hover:shadow border-l-2 border-purple-400 mb-2"
                 >
                   <span class="truncate flex items-center">
-                    <span class="mr-1">↩</span> Back to All Namespaces
+                    <span class="mr-1">↩</span> to All Namespaces
                   </span>
                 </.link>
               <% true -> %>
@@ -73,80 +77,80 @@
             <% end %>
           </div>
 
-          <h3 class="font-semibold text-gray-700 mb-3 text-center">Jump to schedule</h3>
-          <div class="max-h-[calc(100vh-200px)] overflow-y-auto pr-1 space-y-4">
-            <!-- Working Schedules -->
-            <div>
-              <h4 class="text-sm font-medium text-green-700 mb-1 flex items-center">
-                <span class="mr-1">🚀</span> Working
-              </h4>
-              <div class="space-y-1">
-                <%= for schedule <- @filtered_sleep_schedules || @sleep_schedules do %>
-                  <%= if schedule["spec"]["enabled"] != false && get_condition(schedule, "Sleeping")["status"] != "True" do %>
-                    <a
-                      href={"#schedule-#{schedule["metadata"]["namespace"]}-#{schedule["metadata"]["name"]}"}
-                      class="flex text-gray-800 hover:text-black px-3 py-2 rounded-xl transition-all duration-200 bg-green-50 bg-opacity-70 hover:bg-opacity-100 text-sm truncate shadow-sm hover:shadow border-l-2 border-green-400"
-                    >
-                      <span class="truncate">
-                        <%= if @namespace == nil do %>
-                          {String.capitalize(schedule["metadata"]["namespace"])} /
-                        <% end %>
-                        {String.capitalize(schedule["metadata"]["name"])}
-                      </span>
-                    </a>
+          <%= if @name == nil do %>
+            <h3 class="font-semibold text-gray-700 mb-3 text-center">Jump to schedule</h3>
+            <div class="max-h-[calc(100vh-200px)] overflow-y-auto pr-1 space-y-4">
+              <!-- Working Schedules -->
+              <div>
+                <h4 class="text-sm font-medium text-green-700 mb-1 flex items-center">
+                  <span class="mr-1">🚀</span> Working
+                </h4>
+                <div class="space-y-1">
+                  <%= for schedule <- @filtered_sleep_schedules || @sleep_schedules do %>
+                    <%= if schedule["spec"]["enabled"] != false && get_condition(schedule, "Sleeping")["status"] != "True" do %>
+                      <a
+                        href={"#schedule-#{schedule["metadata"]["namespace"]}-#{schedule["metadata"]["name"]}"}
+                        class="flex text-gray-800 hover:text-black px-3 py-2 rounded-xl transition-all duration-200 bg-green-50 bg-opacity-70 hover:bg-opacity-100 text-sm truncate shadow-sm hover:shadow border-l-2 border-green-400"
+                      >
+                        <span class="truncate">
+                          <%= if @namespace == nil do %>
+                            {String.capitalize(schedule["metadata"]["namespace"])} /
+                          <% end %>
+                          {String.capitalize(schedule["metadata"]["name"])}
+                        </span>
+                      </a>
+                    <% end %>
                   <% end %>
-                <% end %>
+                </div>
+              </div>
+              <!-- Sleeping Schedules -->
+              <div>
+                <h4 class="text-sm font-medium text-blue-700 mb-1 flex items-center">
+                  <span class="mr-1">💤</span> Sleeping
+                </h4>
+                <div class="space-y-1">
+                  <%= for schedule <- @filtered_sleep_schedules || @sleep_schedules do %>
+                    <%= if schedule["spec"]["enabled"] != false && get_condition(schedule, "Sleeping")["status"] == "True" do %>
+                      <a
+                        href={"#schedule-#{schedule["metadata"]["namespace"]}-#{schedule["metadata"]["name"]}"}
+                        class="flex text-gray-800 hover:text-black px-3 py-2 rounded-xl transition-all duration-200 bg-blue-50 bg-opacity-70 hover:bg-opacity-100 text-sm truncate shadow-sm hover:shadow border-l-2 border-blue-400"
+                      >
+                        <span class="truncate">
+                          <%= if @namespace == nil do %>
+                            {String.capitalize(schedule["metadata"]["namespace"])} /
+                          <% end %>
+                          {String.capitalize(schedule["metadata"]["name"])}
+                        </span>
+                      </a>
+                    <% end %>
+                  <% end %>
+                </div>
+              </div>
+              <!-- Disabled Schedules -->
+              <div>
+                <h4 class="text-sm font-medium text-gray-700 mb-1 flex items-center">
+                  <span class="mr-1">🛑</span> Disabled
+                </h4>
+                <div class="space-y-1">
+                  <%= for schedule <- @filtered_sleep_schedules || @sleep_schedules do %>
+                    <%= if schedule["spec"]["enabled"] == false do %>
+                      <a
+                        href={"#schedule-#{schedule["metadata"]["namespace"]}-#{schedule["metadata"]["name"]}"}
+                        class="flex text-gray-800 hover:text-black px-3 py-2 rounded-xl transition-all duration-200 bg-gray-50 bg-opacity-70 hover:bg-opacity-100 text-sm truncate shadow-sm hover:shadow border-l-2 border-gray-400"
+                      >
+                        <span class="truncate">
+                          <%= if @namespace == nil do %>
+                            {String.capitalize(schedule["metadata"]["namespace"])} /
+                          <% end %>
+                          {String.capitalize(schedule["metadata"]["name"])}
+                        </span>
+                      </a>
+                    <% end %>
+                  <% end %>
+                </div>
               </div>
             </div>
-            
-<!-- Sleeping Schedules -->
-            <div>
-              <h4 class="text-sm font-medium text-blue-700 mb-1 flex items-center">
-                <span class="mr-1">💤</span> Sleeping
-              </h4>
-              <div class="space-y-1">
-                <%= for schedule <- @filtered_sleep_schedules || @sleep_schedules do %>
-                  <%= if schedule["spec"]["enabled"] != false && get_condition(schedule, "Sleeping")["status"] == "True" do %>
-                    <a
-                      href={"#schedule-#{schedule["metadata"]["namespace"]}-#{schedule["metadata"]["name"]}"}
-                      class="flex text-gray-800 hover:text-black px-3 py-2 rounded-xl transition-all duration-200 bg-blue-50 bg-opacity-70 hover:bg-opacity-100 text-sm truncate shadow-sm hover:shadow border-l-2 border-blue-400"
-                    >
-                      <span class="truncate">
-                        <%= if @namespace == nil do %>
-                          {String.capitalize(schedule["metadata"]["namespace"])} /
-                        <% end %>
-                        {String.capitalize(schedule["metadata"]["name"])}
-                      </span>
-                    </a>
-                  <% end %>
-                <% end %>
-              </div>
-            </div>
-            
-<!-- Disabled Schedules -->
-            <div>
-              <h4 class="text-sm font-medium text-gray-700 mb-1 flex items-center">
-                <span class="mr-1">🛑</span> Disabled
-              </h4>
-              <div class="space-y-1">
-                <%= for schedule <- @filtered_sleep_schedules || @sleep_schedules do %>
-                  <%= if schedule["spec"]["enabled"] == false do %>
-                    <a
-                      href={"#schedule-#{schedule["metadata"]["namespace"]}-#{schedule["metadata"]["name"]}"}
-                      class="flex text-gray-800 hover:text-black px-3 py-2 rounded-xl transition-all duration-200 bg-gray-50 bg-opacity-70 hover:bg-opacity-100 text-sm truncate shadow-sm hover:shadow border-l-2 border-gray-400"
-                    >
-                      <span class="truncate">
-                        <%= if @namespace == nil do %>
-                          {String.capitalize(schedule["metadata"]["namespace"])} /
-                        <% end %>
-                        {String.capitalize(schedule["metadata"]["name"])}
-                      </span>
-                    </a>
-                  <% end %>
-                <% end %>
-              </div>
-            </div>
-          </div>
+          <% end %>
         </div>
       </div>
     </div>
