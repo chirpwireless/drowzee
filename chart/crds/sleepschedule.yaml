@@ -92,13 +92,13 @@ spec:
                   description: The ingress that will be slept/woken.
                 sleepTime:
                   type: string
-                  description: "The time that the deployment will start sleeping(format: HH:MMam/pm)"
+                  description: "The time that the deployment will start sleeping (format: HH:MM for 24h or H:MMam/pm for 12h)"
                 timezone:
                   type: string
                   description: The timezone that the input times are based in
                 wakeTime:
                   type: string
-                  description: "The time that the deployment will wake up (format: HH:MMam/pm)"
+                  description: "The time that the deployment will wake up (format: HH:MM for 24h or H:MMam/pm for 12h)"
                 dayOfWeek:
                   type: string
                   description: "Cron-like expression for days of the week when the schedule is active (0-6 or SUN-SAT). Examples: '1-5' for weekdays, '0,6' for weekends, '*' for all days (default)."
