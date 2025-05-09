@@ -68,13 +68,23 @@ defmodule Drowzee.Controller.SleepScheduleController do
     sleep_time = resource["spec"]["sleepTime"]
     wake_time = resource["spec"]["wakeTime"]
     timezone = resource["spec"]["timezone"]
+    day_of_week = resource["spec"]["dayOfWeek"] || "*"
 
     # Log if wake_time is not defined (resources will remain down indefinitely)
     if is_nil(wake_time) or wake_time == "" do
       Logger.info("Wake time is not defined. Resources will remain scaled down/suspended indefinitely.")
     end
 
-    case Drowzee.SleepChecker.naptime?(sleep_time, wake_time, timezone) do
+    # Log day of week configuration if not default
+    if day_of_week != "*" do
+      Logger.info("Schedule is active only on days matching: #{day_of_week}")
+    end
+
+    case Drowzee.SleepChecker.naptime?(sleep_time, wake_time, timezone, day_of_week) do
+      {:ok, :inactive_day} ->
+        # If today is not an active day, skip processing (maintain current state)
+        Logger.info("Today is not an active day for this schedule, skipping state changes")
+        axn
       {:ok, naptime} ->
         %{axn | assigns: Map.put(axn.assigns, :naptime, naptime)}
       {:error, reason} ->
