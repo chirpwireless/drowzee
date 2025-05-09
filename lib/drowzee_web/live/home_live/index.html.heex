@@ -269,11 +269,26 @@
       }
     });
     
+    // Multiple checks with increasing delays to ensure content is fully rendered
     // Initial check
     checkScrollable();
     
-    // Also check after a short delay to account for any rendering delays
-    setTimeout(checkScrollable, 300);
+    // Check multiple times with increasing delays
+    [50, 200, 500, 1000].forEach(delay => {
+      setTimeout(checkScrollable, delay);
+    });
+    
+    // Set up a mutation observer to detect content changes
+    const observer = new MutationObserver(checkScrollable);
+    
+    // Observe each scrollable container for content changes
+    scrollableContainers.forEach(({ container }) => {
+      observer.observe(container, { 
+        childList: true,   // Watch for changes to child elements
+        subtree: true,     // Watch the entire subtree
+        characterData: true // Watch for text changes
+      });
+    });
   });
   
   // Debounce function to limit how often resize handler fires
