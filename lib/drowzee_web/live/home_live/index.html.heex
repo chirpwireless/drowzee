@@ -30,6 +30,25 @@
         <div class="absolute -bottom-4 -left-4 w-14 h-14 rounded-full bg-white opacity-70"></div>
 
         <div class="relative z-10">
+          <%= if @namespace == nil && length(@all_namespaces) > 0 do %>
+            <div class="mb-5">
+              <h3 class="font-semibold text-gray-700 mb-3 text-center">Namespaces</h3>
+              <div class="space-y-1">
+                <%= for namespace <- @all_namespaces do %>
+                  <.link
+                    navigate={~p"/#{namespace}"}
+                    class="flex text-gray-800 hover:text-black px-3 py-2 rounded-xl transition-all duration-200 bg-yellow-50 bg-opacity-70 hover:bg-opacity-100 text-sm truncate shadow-sm hover:shadow border-l-2 border-yellow-400"
+                  >
+                    <span class="truncate flex items-center">
+                      <span class="mr-1">📁</span>
+                      {String.capitalize(namespace)}
+                    </span>
+                  </.link>
+                <% end %>
+              </div>
+            </div>
+          <% end %>
+          
           <h3 class="font-semibold text-gray-700 mb-3 text-center">Jump to schedule</h3>
           <div class="max-h-[calc(100vh-200px)] overflow-y-auto pr-1 space-y-4">
             <!-- Working Schedules -->

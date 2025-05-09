@@ -192,12 +192,25 @@ defmodule DrowzeeWeb.HomeLive.Index do
   end
 
   defp load_sleep_schedules(socket) do
+    # Get all sleep schedules for the current namespace or specific schedule
     sleep_schedules = case socket.assigns.name do
       nil ->
         Drowzee.K8s.sleep_schedules(socket.assigns.namespace)
       name ->
         [Drowzee.K8s.get_sleep_schedule!(name, socket.assigns.namespace)]
     end
+    
+    # Extract unique namespaces from all sleep schedules
+    all_namespaces = 
+      if socket.assigns.namespace == nil do
+        # Only load all namespaces when viewing the main page
+        sleep_schedules
+        |> Enum.map(fn schedule -> schedule["metadata"]["namespace"] end)
+        |> Enum.uniq()
+        |> Enum.sort()
+      else
+        []
+      end
 
     {deployments_by_name, statefulsets_by_name, cronjobs_by_name} =
       case socket.assigns.name do
@@ -236,6 +249,7 @@ defmodule DrowzeeWeb.HomeLive.Index do
 
     socket
     |> assign(:sleep_schedules, sleep_schedules)
+    |> assign(:all_namespaces, all_namespaces)
     |> assign(:deployments_by_name, deployments_by_name)
     |> assign(:statefulsets_by_name, statefulsets_by_name)
     |> assign(:cronjobs_by_name, cronjobs_by_name)
