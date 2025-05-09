@@ -98,7 +98,12 @@
               <div>
                 <h4 class="text-sm font-medium text-green-700 mb-1 flex items-center justify-between">
                   <span><span class="mr-1">🚀</span> Working</span>
-                  <span class="text-xs text-green-600 italic scroll-indicator" style="display: none;">Scroll ↕</span>
+                  <span
+                    class="text-xs text-green-600 italic scroll-indicator"
+                    style="display: none;"
+                  >
+                    Scroll ↕
+                  </span>
                 </h4>
                 <div class="max-h-[20vh] overflow-y-auto pr-1 space-y-1 border border-green-100 rounded-md p-1 bg-green-50/30 scrollable-content">
                   <%= for schedule <- @filtered_sleep_schedules || @sleep_schedules do %>
@@ -122,7 +127,12 @@
               <div>
                 <h4 class="text-sm font-medium text-blue-700 mb-1 flex items-center justify-between">
                   <span><span class="mr-1">💤</span> Sleeping</span>
-                  <span class="text-xs text-blue-600 italic scroll-indicator" style="display: none;">Scroll ↕</span>
+                  <span
+                    class="text-xs text-blue-600 italic scroll-indicator"
+                    style="display: none;"
+                  >
+                    Scroll ↕
+                  </span>
                 </h4>
                 <div class="max-h-[20vh] overflow-y-auto pr-1 space-y-1 border border-blue-100 rounded-md p-1 bg-blue-50/30 scrollable-content">
                   <%= for schedule <- @filtered_sleep_schedules || @sleep_schedules do %>
@@ -146,7 +156,12 @@
               <div>
                 <h4 class="text-sm font-medium text-gray-700 mb-1 flex items-center justify-between">
                   <span><span class="mr-1">🛑</span> Disabled</span>
-                  <span class="text-xs text-gray-600 italic scroll-indicator" style="display: none;">Scroll ↕</span>
+                  <span
+                    class="text-xs text-gray-600 italic scroll-indicator"
+                    style="display: none;"
+                  >
+                    Scroll ↕
+                  </span>
                 </h4>
                 <div class="max-h-[20vh] overflow-y-auto pr-1 space-y-1 border border-gray-200 rounded-md p-1 bg-gray-50/50 scrollable-content">
                   <%= for schedule <- @filtered_sleep_schedules || @sleep_schedules do %>
@@ -257,63 +272,63 @@
         });
       });
       // More performant scroll indicator handling
-  const scrollableContainers = [];
-  
-  // Initialize once on page load - cache DOM references
-  document.addEventListener('DOMContentLoaded', function() {
-    // Cache all container/indicator pairs
-    document.querySelectorAll('.scrollable-content').forEach(function(container) {
-      const header = container.parentElement.querySelector('.scroll-indicator');
-      if (header) {
-        scrollableContainers.push({ container, header });
-      }
-    });
-    
-    // Multiple checks with increasing delays to ensure content is fully rendered
-    // Initial check
-    checkScrollable();
-    
-    // Check multiple times with increasing delays
-    [50, 200, 500, 1000].forEach(delay => {
-      setTimeout(checkScrollable, delay);
-    });
-    
-    // Set up a mutation observer to detect content changes
-    const observer = new MutationObserver(checkScrollable);
-    
-    // Observe each scrollable container for content changes
-    scrollableContainers.forEach(({ container }) => {
-      observer.observe(container, { 
-        childList: true,   // Watch for changes to child elements
-        subtree: true,     // Watch the entire subtree
-        characterData: true // Watch for text changes
+      const scrollableContainers = [];
+
+      // Initialize once on page load - cache DOM references
+      document.addEventListener('DOMContentLoaded', function() {
+        // Cache all container/indicator pairs
+        document.querySelectorAll('.scrollable-content').forEach(function(container) {
+          const header = container.parentElement.querySelector('.scroll-indicator');
+          if (header) {
+            scrollableContainers.push({ container, header });
+          }
+        });
+        
+        // Multiple checks with increasing delays to ensure content is fully rendered
+        // Initial check
+        checkScrollable();
+        
+        // Check multiple times with increasing delays
+        [50, 200, 500, 1000].forEach(delay => {
+          setTimeout(checkScrollable, delay);
+        });
+        
+        // Set up a mutation observer to detect content changes
+        const observer = new MutationObserver(checkScrollable);
+        
+        // Observe each scrollable container for content changes
+        scrollableContainers.forEach(({ container }) => {
+          observer.observe(container, { 
+            childList: true,   // Watch for changes to child elements
+            subtree: true,     // Watch the entire subtree
+            characterData: true // Watch for text changes
+          });
+        });
       });
-    });
-  });
-  
-  // Debounce function to limit how often resize handler fires
-  let resizeTimer;
-  window.addEventListener('resize', function() {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(checkScrollable, 100);
-  });
-  
-  // Optimized check function that uses cached references
-  function checkScrollable() {
-    scrollableContainers.forEach(function({ container, header }) {
-      // Check if content is scrollable (content height > container height)
-      const isScrollable = container.scrollHeight > container.clientHeight;
-      
-      // Only update DOM if display state needs to change
-      const currentDisplay = header.style.display;
-      const newDisplay = isScrollable ? 'inline' : 'none';
-      
-      if (currentDisplay !== newDisplay) {
-        header.style.display = newDisplay;
+
+      // Debounce function to limit how often resize handler fires
+      let resizeTimer;
+      window.addEventListener('resize', function() {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(checkScrollable, 100);
+      });
+
+      // Optimized check function that uses cached references
+      function checkScrollable() {
+        scrollableContainers.forEach(function({ container, header }) {
+          // Check if content is scrollable (content height > container height)
+          const isScrollable = container.scrollHeight > container.clientHeight;
+          
+          // Only update DOM if display state needs to change
+          const currentDisplay = header.style.display;
+          const newDisplay = isScrollable ? 'inline' : 'none';
+          
+          if (currentDisplay !== newDisplay) {
+            header.style.display = newDisplay;
+          }
+        });
       }
-    });
-  }
-</script>
+    </script>
 
     <ul class="space-y-8">
       <%= if @sleep_schedules == [] do %>
