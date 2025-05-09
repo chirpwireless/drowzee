@@ -30,6 +30,7 @@
         <div class="absolute -bottom-4 -left-4 w-14 h-14 rounded-full bg-white opacity-70"></div>
 
         <div class="relative z-10">
+          <!-- Navigation Section -->
           <div class="mb-5">
             <%= cond do %>
               <% @name != nil -> %>
@@ -61,7 +62,7 @@
               <% true -> %>
                 <!-- On Main Page: Show namespaces list -->
                 <h3 class="font-semibold text-gray-700 mb-3 text-center">Namespaces</h3>
-                <div class="space-y-1">
+                <div class="max-h-[calc(25vh)] overflow-y-auto pr-1 space-y-1">
                   <%= for namespace <- @all_namespaces do %>
                     <.link
                       navigate={~p"/#{namespace}"}
@@ -79,13 +80,13 @@
 
           <%= if @name == nil do %>
             <h3 class="font-semibold text-gray-700 mb-3 text-center">Jump to schedule</h3>
-            <div class="max-h-[calc(100vh-200px)] overflow-y-auto pr-1 space-y-4">
+            <div class="space-y-4">
               <!-- Working Schedules -->
               <div>
                 <h4 class="text-sm font-medium text-green-700 mb-1 flex items-center">
                   <span class="mr-1">🚀</span> Working
                 </h4>
-                <div class="space-y-1">
+                <div class="max-h-[20vh] overflow-y-auto pr-1 space-y-1">
                   <%= for schedule <- @filtered_sleep_schedules || @sleep_schedules do %>
                     <%= if schedule["spec"]["enabled"] != false && get_condition(schedule, "Sleeping")["status"] != "True" do %>
                       <a
@@ -108,7 +109,7 @@
                 <h4 class="text-sm font-medium text-blue-700 mb-1 flex items-center">
                   <span class="mr-1">💤</span> Sleeping
                 </h4>
-                <div class="space-y-1">
+                <div class="max-h-[20vh] overflow-y-auto pr-1 space-y-1">
                   <%= for schedule <- @filtered_sleep_schedules || @sleep_schedules do %>
                     <%= if schedule["spec"]["enabled"] != false && get_condition(schedule, "Sleeping")["status"] == "True" do %>
                       <a
@@ -131,7 +132,7 @@
                 <h4 class="text-sm font-medium text-gray-700 mb-1 flex items-center">
                   <span class="mr-1">🛑</span> Disabled
                 </h4>
-                <div class="space-y-1">
+                <div class="max-h-[20vh] overflow-y-auto pr-1 space-y-1">
                   <%= for schedule <- @filtered_sleep_schedules || @sleep_schedules do %>
                     <%= if schedule["spec"]["enabled"] == false do %>
                       <a
