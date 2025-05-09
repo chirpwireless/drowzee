@@ -109,6 +109,10 @@ spec:
           type: string
           description: Enabled
           jsonPath: .spec.enabled
+        - name: DayOfWeek
+          type: string
+          description: Active Days
+          jsonPath: .spec.dayOfWeek
         - name: SleepTime
           type: string
           description: Starts Sleeping
@@ -146,7 +150,6 @@ spec:
           description: Status overridden by user
           jsonPath: .status.conditions[?(@.type == "ManualOverride")].status
       served: true
-      deprecationWarning: ""
 metadata:
   name: sleepschedules.drowzee.challengr.io
   labels:
