@@ -61,8 +61,31 @@ defmodule Drowzee.SleepChecker do
   defp day_of_week_matches?(now, day_of_week) do
     # Convert Elixir's Date.day_of_week (1-7, Monday is 1) to Crontab's format (0-6, Sunday is 0)
     dow_num = Date.day_of_week(now)
-    _cron_dow = if dow_num == 7, do: 0, else: dow_num
-
+    cron_dow = if dow_num == 7, do: 0, else: dow_num
+    
+    # Log the current day for debugging
+    Logger.debug("Current day: #{now.day}, dow_num: #{dow_num}, cron_dow: #{cron_dow}")
+    
+    # Handle text-based day of week expressions (MON, TUE, etc.)
+    day_of_week = cond do
+      # If it's already a numeric expression, keep it as is
+      String.match?(day_of_week, ~r/^[0-9,\-*]+$/) -> 
+        day_of_week
+      # Otherwise, convert text days to numbers
+      true ->
+        day_of_week
+        |> String.upcase()
+        |> String.replace("SUN", "0")
+        |> String.replace("MON", "1")
+        |> String.replace("TUE", "2")
+        |> String.replace("WED", "3")
+        |> String.replace("THU", "4")
+        |> String.replace("FRI", "5")
+        |> String.replace("SAT", "6")
+    end
+    
+    Logger.debug("Checking if day #{cron_dow} matches expression: #{day_of_week}")
+    
     # Create a full cron expression with the day of week part
     # The format is: minute hour day month day_of_week
     cron_expression = "* * * * #{day_of_week}"
