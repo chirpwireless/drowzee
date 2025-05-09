@@ -69,7 +69,20 @@
                       class="flex text-gray-800 hover:text-black px-3 py-2 rounded-xl transition-all duration-200 bg-yellow-50 bg-opacity-70 hover:bg-opacity-100 text-sm truncate shadow-sm hover:shadow border-l-2 border-yellow-400"
                     >
                       <span class="truncate flex items-center">
-                        <span class="mr-1">📁</span>
+                        <span class="mr-1">
+                          <%= case Map.get(@namespace_statuses, namespace, "unknown") do %>
+                            <% "awake" -> %>
+                              🚀 <!-- Rocket emoji for all awake -->
+                            <% "sleeping" -> %>
+                              💤 <!-- Sleeping emoji for all sleeping -->
+                            <% "mixed" -> %>
+                              🚀/💤 <!-- Rocket/Sleeping for mixed -->
+                            <% "disabled" -> %>
+                              🛑 <!-- Stop sign for disabled -->
+                            <% _ -> %>
+                              📁 <!-- Folder for unknown -->
+                          <% end %>
+                        </span>
                         {String.capitalize(namespace)}
                       </span>
                     </.link>

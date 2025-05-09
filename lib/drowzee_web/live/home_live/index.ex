@@ -256,16 +256,26 @@ defmodule DrowzeeWeb.HomeLive.Index do
           [Drowzee.K8s.get_sleep_schedule!(name, socket.assigns.namespace)]
       end
 
-    # Extract unique namespaces from all sleep schedules
-    all_namespaces =
+    # Extract unique namespaces and calculate their statuses
+    {all_namespaces, namespace_statuses} =
       if socket.assigns.namespace == nil do
-        # Only load all namespaces when viewing the main page
-        sleep_schedules
-        |> Enum.map(fn schedule -> schedule["metadata"]["namespace"] end)
-        |> Enum.uniq()
-        |> Enum.sort()
+        # Only fetch all schedules when viewing the main page
+        all_schedules = Drowzee.K8s.sleep_schedules(nil)
+
+        # Get unique namespaces
+        namespaces =
+          all_schedules
+          |> Enum.map(fn schedule -> schedule["metadata"]["namespace"] end)
+          |> Enum.uniq()
+          |> Enum.sort()
+
+        # Calculate status for each namespace
+        statuses = calculate_namespace_statuses(all_schedules)
+
+        {namespaces, statuses}
       else
-        []
+        # Don't calculate namespace statuses when not on the main page
+        {[], %{}}
       end
 
     {deployments_by_name, statefulsets_by_name, cronjobs_by_name} =
@@ -311,6 +321,7 @@ defmodule DrowzeeWeb.HomeLive.Index do
     socket
     |> assign(:sleep_schedules, sleep_schedules)
     |> assign(:all_namespaces, all_namespaces)
+    |> assign(:namespace_statuses, namespace_statuses)
     |> assign(:deployments_by_name, deployments_by_name)
     |> assign(:statefulsets_by_name, statefulsets_by_name)
     |> assign(:cronjobs_by_name, cronjobs_by_name)
@@ -364,6 +375,53 @@ defmodule DrowzeeWeb.HomeLive.Index do
         # Handle text format (MON-FRI or SUN,SAT)
         String.upcase(day_of_week)
     end
+  end
+
+  # Calculate the status of each namespace based on its schedules
+  defp calculate_namespace_statuses(schedules) do
+    # Group schedules by namespace - use for_reduce for better performance
+    schedules
+    |> Enum.reduce(%{}, fn schedule, acc ->
+      namespace = schedule["metadata"]["namespace"]
+      schedules_list = Map.get(acc, namespace, [])
+      Map.put(acc, namespace, [schedule | schedules_list])
+    end)
+    |> Enum.map(fn {namespace, ns_schedules} ->
+      # Only consider enabled schedules
+      enabled_schedules =
+        Enum.filter(ns_schedules, fn schedule ->
+          schedule["spec"]["enabled"] != false
+        end)
+
+      status =
+        if enabled_schedules == [] do
+          # If no enabled schedules, consider namespace as disabled
+          "disabled"
+        else
+          # Use any? and all? for more efficient checks
+          all_sleeping =
+            Enum.all?(enabled_schedules, fn schedule ->
+              get_condition(schedule, "Sleeping")["status"] == "True"
+            end)
+
+          any_sleeping =
+            Enum.any?(enabled_schedules, fn schedule ->
+              get_condition(schedule, "Sleeping")["status"] == "True"
+            end)
+
+          cond do
+            # All schedules are sleeping
+            all_sleeping -> "sleeping"
+            # All schedules are awake
+            not any_sleeping -> "awake"
+            # Mixed state
+            true -> "mixed"
+          end
+        end
+
+      {namespace, status}
+    end)
+    |> Map.new()
   end
 
   def replace_sleep_schedule(socket, updated_sleep_schedule) do
