@@ -1,10 +1,11 @@
 apiVersion: drowzee.challengr.io/v1beta1
 kind: SleepSchedule
 metadata:
-  name: testing
+  name: working-hours
 spec:
   sleepTime: "10:00pm"
   wakeTime: "09:00am"
+  dayOfWeek: "mon-fri"
   timezone: "Australia/Sydney"
   deployments:
     - name: dummy-service
@@ -13,38 +14,26 @@ spec:
 apiVersion: drowzee.challengr.io/v1beta1
 kind: SleepSchedule
 metadata:
-  name: service1
-  namespace: services
+  name: every-day
 spec:
   sleepTime: "10:00pm"
   wakeTime: "09:00am"
+  dayOfWeek: "*"
   timezone: "Australia/Sydney"
   deployments:
     - name: service1
     - name: service1-worker
+  cronjobs:
+    - name: service1-backup
   ingressName: service1
 ---
 apiVersion: drowzee.challengr.io/v1beta1
 kind: SleepSchedule
 metadata:
-  name: service2
-  namespace: services
-spec:
-  sleepTime: "10:00pm"
-  wakeTime: "09:00am"
-  timezone: "Australia/Sydney"
-  deployments:
-    - name: service2
-    - name: service2-worker
-  ingressName: service2
----
-apiVersion: drowzee.challengr.io/v1beta1
-kind: SleepSchedule
-metadata:
   name: permanent-down
-  namespace: services
 spec:
   sleepTime: "08:00pm"
+  dayOfWeek: "*"
   # No wakeTime defined - resources will remain scaled down indefinitely
   timezone: "Australia/Sydney"
   deployments:
