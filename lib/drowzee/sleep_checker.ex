@@ -4,10 +4,31 @@ defmodule Drowzee.SleepChecker do
   # Define the function head with default value
   def naptime?(sleep_time, wake_time, timezone, day_of_week \\ "*")
 
-  def naptime?(_sleep_time, nil, _timezone, _day_of_week) do
-    # If wake_time is nil, always consider it naptime (always sleeping)
-    Logger.debug("Wake time is not defined, resources will remain scaled down/suspended indefinitely")
-    {:ok, true}
+  def naptime?(sleep_time, nil, timezone, day_of_week) do
+    # If wake_time is nil, we need to check if today is an active day for the schedule
+    now = DateTime.now!(timezone)
+    today_date = DateTime.to_date(now)
+    
+    # Check if schedule is active today based on day of week
+    is_active_today = day_of_week_matches?(now, day_of_week)
+    
+    if not is_active_today do
+      # If today is not an active day for the schedule, skip the schedule
+      dow_num = Date.day_of_week(today_date)
+      dow_name = Timex.day_name(dow_num)
+      Logger.debug("Today (#{dow_num}/#{dow_name}) is not in day of week expression '#{day_of_week}', schedule will be skipped")
+      {:ok, :inactive_day} # Skip the schedule, maintain current state
+    else
+      # On active days for the schedule, check if we've passed the sleep time
+      with {:ok, sleep_datetime} <- parse_time(sleep_time, today_date, timezone) do
+        # Compare current time with sleep time
+        result = DateTime.compare(now, sleep_datetime) in [:eq, :gt]
+        Logger.debug("Wake time is not defined. Sleep time: #{format(sleep_datetime, "{h24}:{m}:{s}")}, Now: #{format(now)}. Naptime: #{result}")
+        {:ok, result} # It's naptime only if we've passed sleep time
+      else
+        {:error, error} -> {:error, error}
+      end
+    end
   end
 
   def naptime?(sleep_time, "", timezone, day_of_week) do
