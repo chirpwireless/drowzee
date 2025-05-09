@@ -262,6 +262,34 @@ defmodule DrowzeeWeb.HomeLive.Index do
       |> Timex.format!("{h12}:{m}{am}")
   end
 
+  def format_day_of_week(day_of_week) do
+    cond do
+      day_of_week == "*" ->
+        "ALL DAYS"
+      String.match?(day_of_week, ~r/^\d/) ->
+        # Handle numeric format (0,6 or 1-5)
+        day_of_week
+        |> String.split([",", "-"])
+        |> Enum.map(fn d ->
+          case d do
+            "0" -> "SUN"
+            "1" -> "MON"
+            "2" -> "TUE"
+            "3" -> "WED"
+            "4" -> "THU"
+            "5" -> "FRI"
+            "6" -> "SAT"
+            _ -> d
+          end
+        end)
+        |> Enum.join(", ")
+        |> String.replace(", ", "-", global: false)
+      true ->
+        # Handle text format (MON-FRI or SUN,SAT)
+        String.upcase(day_of_week)
+    end
+  end
+
   def replace_sleep_schedule(socket, updated_sleep_schedule) do
     sleep_schedules = Enum.map(socket.assigns.sleep_schedules, fn sleep_schedule ->
       if sleep_schedule["metadata"]["name"] == updated_sleep_schedule["metadata"]["name"] && sleep_schedule["metadata"]["namespace"] == updated_sleep_schedule["metadata"]["namespace"] do
