@@ -247,45 +247,17 @@ defmodule DrowzeeWeb.HomeLive.Index do
 
   defp load_sleep_schedules(socket) do
     # Get all sleep schedules for the current namespace or specific schedule
-    sleep_schedules =
+    {sleep_schedules, deployments_by_name, statefulsets_by_name, cronjobs_by_name} =
       case socket.assigns.name do
         nil ->
-          Drowzee.K8s.sleep_schedules(socket.assigns.namespace)
-
-        name ->
-          [Drowzee.K8s.get_sleep_schedule!(name, socket.assigns.namespace)]
-      end
-
-    # Extract unique namespaces and calculate their statuses
-    {all_namespaces, namespace_statuses} =
-      if socket.assigns.namespace == nil do
-        # Only fetch all schedules when viewing the main page
-        all_schedules = Drowzee.K8s.sleep_schedules(nil)
-
-        # Get unique namespaces
-        namespaces =
-          all_schedules
-          |> Enum.map(fn schedule -> schedule["metadata"]["namespace"] end)
-          |> Enum.uniq()
-          |> Enum.sort()
-
-        # Calculate status for each namespace
-        statuses = calculate_namespace_statuses(all_schedules)
-
-        {namespaces, statuses}
-      else
-        # Don't calculate namespace statuses when not on the main page
-        {[], %{}}
-      end
-
-    {deployments_by_name, statefulsets_by_name, cronjobs_by_name} =
-      case socket.assigns.name do
-        nil ->
-          {%{}, %{}, %{}}
+          schedules = Drowzee.K8s.sleep_schedules(socket.assigns.namespace)
+          {schedules, %{}, %{}, %{}}
 
         _name ->
+          schedules = Drowzee.K8s.sleep_schedules(socket.assigns.namespace)
+
           deployments =
-            sleep_schedules
+            schedules
             |> Enum.flat_map(fn schedule ->
               case Drowzee.K8s.SleepSchedule.get_deployments(schedule) do
                 {:ok, ds} -> ds
@@ -294,7 +266,7 @@ defmodule DrowzeeWeb.HomeLive.Index do
             end)
 
           statefulsets =
-            sleep_schedules
+            schedules
             |> Enum.flat_map(fn schedule ->
               case Drowzee.K8s.SleepSchedule.get_statefulsets(schedule) do
                 {:ok, ss} -> ss
@@ -303,7 +275,7 @@ defmodule DrowzeeWeb.HomeLive.Index do
             end)
 
           cronjobs =
-            sleep_schedules
+            schedules
             |> Enum.flat_map(fn schedule ->
               case Drowzee.K8s.SleepSchedule.get_cronjobs(schedule) do
                 {:ok, cs} -> cs
@@ -312,16 +284,44 @@ defmodule DrowzeeWeb.HomeLive.Index do
             end)
 
           {
+            schedules,
             Map.new(deployments, &{&1["metadata"]["name"], &1}),
             Map.new(statefulsets, &{&1["metadata"]["name"], &1}),
             Map.new(cronjobs, &{&1["metadata"]["name"], &1})
           }
       end
 
+    # Handle namespace statuses based on the current view
+    # Use a single API call approach to improve performance
+    {all_namespaces, namespace_statuses, current_namespace_status} =
+      cond do
+        # On main page: fetch all schedules once and calculate everything
+        socket.assigns.namespace == nil ->
+          # Get all schedules for the main page (single API call)
+          all_schedules = Drowzee.K8s.sleep_schedules(nil)
+          
+          # Extract unique namespaces
+          namespaces =
+            all_schedules
+            |> Enum.map(fn schedule -> schedule["metadata"]["namespace"] end)
+            |> Enum.uniq()
+            |> Enum.sort()
+          
+          # Calculate all namespace statuses at once
+          {namespaces, calculate_namespace_statuses(all_schedules), nil}
+          
+        # On namespace page: we already have the schedules from above
+        true ->
+          # Reuse the already fetched schedules to calculate namespace status
+          # This avoids an additional API call
+          {[], %{}, calculate_namespace_status(sleep_schedules)}
+      end
+
     socket
     |> assign(:sleep_schedules, sleep_schedules)
     |> assign(:all_namespaces, all_namespaces)
     |> assign(:namespace_statuses, namespace_statuses)
+    |> assign(:current_namespace_status, current_namespace_status)
     |> assign(:deployments_by_name, deployments_by_name)
     |> assign(:statefulsets_by_name, statefulsets_by_name)
     |> assign(:cronjobs_by_name, cronjobs_by_name)
@@ -377,6 +377,39 @@ defmodule DrowzeeWeb.HomeLive.Index do
     end
   end
 
+  # Calculate the status for a single namespace based on its schedules
+  defp calculate_namespace_status([]), do: "disabled"
+  defp calculate_namespace_status(schedules) do
+    # Filter enabled schedules first - use pattern matching for better performance
+    enabled_schedules = Enum.reject(schedules, &(Map.get(&1["spec"], "enabled") == false))
+    
+    # Early return if no enabled schedules
+    if enabled_schedules == [] do
+      "disabled"
+    else
+      # Check sleeping status - use fast enumeration with early termination
+      # First check if any schedule is awake (not sleeping)
+      case Enum.find(enabled_schedules, fn schedule ->
+        get_condition(schedule, "Sleeping")["status"] != "True"
+      end) do
+        # If we found an awake schedule
+        %{} -> 
+          # Check if any schedule is sleeping
+          case Enum.find(enabled_schedules, fn schedule ->
+            get_condition(schedule, "Sleeping")["status"] == "True"
+          end) do
+            # If we found a sleeping schedule, it's mixed
+            %{} -> "mixed"
+            # If no sleeping schedules found, all are awake
+            nil -> "awake"
+          end
+        
+        # If we didn't find any awake schedule, all are sleeping
+        nil -> "sleeping"
+      end
+    end
+  end
+
   # Calculate the status of each namespace based on its schedules
   defp calculate_namespace_statuses(schedules) do
     # Group schedules by namespace - use for_reduce for better performance
@@ -387,39 +420,8 @@ defmodule DrowzeeWeb.HomeLive.Index do
       Map.put(acc, namespace, [schedule | schedules_list])
     end)
     |> Enum.map(fn {namespace, ns_schedules} ->
-      # Only consider enabled schedules
-      enabled_schedules =
-        Enum.filter(ns_schedules, fn schedule ->
-          schedule["spec"]["enabled"] != false
-        end)
-
-      status =
-        if enabled_schedules == [] do
-          # If no enabled schedules, consider namespace as disabled
-          "disabled"
-        else
-          # Use any? and all? for more efficient checks
-          all_sleeping =
-            Enum.all?(enabled_schedules, fn schedule ->
-              get_condition(schedule, "Sleeping")["status"] == "True"
-            end)
-
-          any_sleeping =
-            Enum.any?(enabled_schedules, fn schedule ->
-              get_condition(schedule, "Sleeping")["status"] == "True"
-            end)
-
-          cond do
-            # All schedules are sleeping
-            all_sleeping -> "sleeping"
-            # All schedules are awake
-            not any_sleeping -> "awake"
-            # Mixed state
-            true -> "mixed"
-          end
-        end
-
-      {namespace, status}
+      # Reuse the calculate_namespace_status function
+      {namespace, calculate_namespace_status(ns_schedules)}
     end)
     |> Map.new()
   end

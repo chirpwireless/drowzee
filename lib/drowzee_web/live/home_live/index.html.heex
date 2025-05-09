@@ -231,7 +231,10 @@
                 phx-click="sleep_all_schedules"
                 phx-value-namespace={@namespace}
                 data-confirm={"Are you sure you want to sleep all schedules in the #{@namespace} namespace?"}
-                class="px-4 py-2 text-sm rounded-lg bg-blue-500 text-white hover:bg-blue-600 disabled:bg-blue-300 disabled:cursor-not-allowed"
+                class={"px-4 py-2 text-sm rounded-lg " <> 
+                  if @current_namespace_status == "sleeping" or @current_namespace_status == "disabled", 
+                    do: "bg-blue-300 text-white opacity-50 pointer-events-none cursor-not-allowed", 
+                    else: "bg-blue-500 text-white hover:bg-blue-600"}
               >
                 😴 Sleep All
               </.link>
@@ -239,7 +242,10 @@
                 phx-click="wake_all_schedules"
                 phx-value-namespace={@namespace}
                 data-confirm={"Are you sure you want to wake all schedules in the #{@namespace} namespace?"}
-                class="px-4 py-2 text-sm rounded-lg bg-green-500 text-white hover:bg-green-600 disabled:bg-green-300 disabled:cursor-not-allowed"
+                class={"px-4 py-2 text-sm rounded-lg " <> 
+                  if @current_namespace_status == "awake" or @current_namespace_status == "disabled", 
+                    do: "bg-green-300 text-white opacity-50 pointer-events-none cursor-not-allowed", 
+                    else: "bg-green-500 text-white hover:bg-green-600"}
               >
                 ☕️ Wake All
               </.link>
