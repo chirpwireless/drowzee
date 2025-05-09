@@ -264,7 +264,7 @@ defmodule DrowzeeWeb.HomeLive.Index do
 
   def format_day_of_week(day_of_week) do
     cond do
-      day_of_week == "*" ->
+      day_of_week in ["*", "", nil] ->
         "ALL DAYS"
       String.match?(day_of_week, ~r/^\d/) ->
         # Handle numeric format (0,6 or 1-5)
