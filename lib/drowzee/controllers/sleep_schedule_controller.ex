@@ -155,17 +155,102 @@ defmodule Drowzee.Controller.SleepScheduleController do
     axn
   end
 
+  # Coordination mechanism for scaling operations with prioritization
+  # Uses an Agent to coordinate scaling operations across multiple schedules
+  
+  # Start the coordinator when the application starts
+  def start_coordinator do
+    Agent.start_link(fn -> %{queue: [], processing: false} end, name: __MODULE__.Coordinator)
+  end
+  
+  # Add a scaling operation to the queue with priority
+  defp queue_scaling_operation(operation, resource, priority) do
+    Agent.update(__MODULE__.Coordinator, fn state = %{queue: queue} ->
+      # Add operation to queue with priority (lower number = higher priority)
+      new_queue = queue ++ [{priority, operation, resource}]
+      # Sort by priority
+      sorted_queue = Enum.sort(new_queue, fn {p1, _, _}, {p2, _, _} -> p1 <= p2 end)
+      %{state | queue: sorted_queue}
+    end)
+    
+    # Start processing if not already running
+    spawn(fn -> process_queue() end)
+  end
+  
+  # Process the queue of scaling operations
+  defp process_queue do
+    # Try to acquire the processing lock
+    Agent.get_and_update(__MODULE__.Coordinator, fn
+      %{processing: true} = state ->
+        # Already processing, do nothing
+        {false, state}
+      %{processing: false, queue: []} = state ->
+        # Nothing to process
+        {false, state}
+      %{processing: false, queue: queue} = state ->
+        # Start processing
+        {true, %{state | processing: true}}
+    end)
+    |> case do
+      false -> :ok  # Already processing or nothing to do
+      true -> do_process_queue()
+    end
+  end
+  
+  # Process the queue items one by one
+  defp do_process_queue do
+    Agent.get_and_update(__MODULE__.Coordinator, fn
+      %{queue: []} = state ->
+        # Queue is empty, stop processing
+        {:done, %{state | processing: false}}
+      %{queue: [{_priority, operation, resource} | rest]} = state ->
+        # Get the next operation and update the queue
+        {{operation, resource}, %{state | queue: rest}}
+    end)
+    |> case do
+      :done -> :ok
+      {operation, resource} ->
+        # Execute the operation
+        try do
+          apply_scaling_operation(operation, resource)
+          # Small delay to avoid overwhelming the Kubernetes API
+          Process.sleep(200)
+        rescue
+          e ->
+            Logger.error("Error executing scaling operation: #{inspect(operation)}, #{inspect(e)}")
+        end
+        # Process the next item
+        do_process_queue()
+    end
+  end
+  
+  # Apply the actual scaling operation
+  defp apply_scaling_operation(operation, resource) do
+    case operation do
+      :scale_down_statefulsets -> SleepSchedule.scale_down_statefulsets(resource)
+      :scale_down_deployments -> SleepSchedule.scale_down_deployments(resource)
+      :suspend_cronjobs -> SleepSchedule.suspend_cronjobs(resource)
+      :scale_up_statefulsets -> SleepSchedule.scale_up_statefulsets(resource)
+      :scale_up_deployments -> SleepSchedule.scale_up_deployments(resource)
+      :resume_cronjobs -> SleepSchedule.resume_cronjobs(resource)
+    end
+  end
+
+  # Prioritized scaling down: StatefulSets (1) -> Deployments (2) -> CronJobs (3)
   defp scale_down_applications(axn) do
-    SleepSchedule.scale_down_deployments(axn.resource)
-    SleepSchedule.scale_down_statefulsets(axn.resource)
-    SleepSchedule.suspend_cronjobs(axn.resource)
+    # Queue operations with priority (lower number = higher priority)
+    queue_scaling_operation(:scale_down_statefulsets, axn.resource, 1)
+    queue_scaling_operation(:scale_down_deployments, axn.resource, 2)
+    queue_scaling_operation(:suspend_cronjobs, axn.resource, 3)
     axn
   end
 
+  # Prioritized scaling up: StatefulSets (1) -> Deployments (2) -> CronJobs (3)
   defp scale_up_applications(axn) do
-    SleepSchedule.scale_up_deployments(axn.resource)
-    SleepSchedule.scale_up_statefulsets(axn.resource)
-    SleepSchedule.resume_cronjobs(axn.resource)
+    # Queue operations with priority (lower number = higher priority)
+    queue_scaling_operation(:scale_up_statefulsets, axn.resource, 1)
+    queue_scaling_operation(:scale_up_deployments, axn.resource, 2)
+    queue_scaling_operation(:resume_cronjobs, axn.resource, 3)
     axn
   end
 
