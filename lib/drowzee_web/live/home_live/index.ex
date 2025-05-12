@@ -4,9 +4,18 @@ defmodule DrowzeeWeb.HomeLive.Index do
   require Logger
   import Drowzee.K8s.SleepSchedule
 
+  # Refresh interval in milliseconds (5 minutes)
+  @refresh_interval 300_000
+  
   @impl true
   def mount(_params, _session, socket) do
-    if connected?(socket), do: Phoenix.PubSub.subscribe(Drowzee.PubSub, "sleep_schedule:updates")
+    if connected?(socket) do
+      # Subscribe to PubSub updates
+      Phoenix.PubSub.subscribe(Drowzee.PubSub, "sleep_schedule:updates")
+      
+      # Schedule periodic refresh to prevent connection issues
+      Process.send_after(self(), :refresh_schedules, @refresh_interval)
+    end
 
     socket =
       socket
@@ -242,6 +251,19 @@ defmodule DrowzeeWeb.HomeLive.Index do
   @spec handle_info({:sleep_schedule_updated}, map()) :: {:noreply, map()}
   def handle_info({:sleep_schedule_updated}, socket) do
     Logger.debug("LiveView: Received sleep schedule update")
+    {:noreply, load_sleep_schedules(socket)}
+  end
+  
+  @impl true
+  def handle_info(:refresh_schedules, socket) do
+    Logger.debug("LiveView: Performing periodic refresh of sleep schedules")
+    
+    # Schedule the next refresh
+    if connected?(socket) do
+      Process.send_after(self(), :refresh_schedules, @refresh_interval)
+    end
+    
+    # Reload the schedules
     {:noreply, load_sleep_schedules(socket)}
   end
 
