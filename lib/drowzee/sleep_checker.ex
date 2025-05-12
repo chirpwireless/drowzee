@@ -19,7 +19,10 @@ defmodule Drowzee.SleepChecker do
       Logger.debug("Today (#{dow_num}/#{dow_name}) is not in day of week expression '#{day_of_week}', apps should be asleep")
       {:ok, true} # Return naptime=true for non-working days
     else
-      # On active days for the schedule, check if we've passed the sleep time
+      # Check the current state of the schedule from the resource status
+      # If the schedule is already sleeping, keep it asleep regardless of sleep time changes
+      # This can be determined by checking the resource status in the controller
+      # For now, we'll just check if we've passed the sleep time
       with {:ok, sleep_datetime} <- parse_time(sleep_time, today_date, timezone) do
         # Compare current time with sleep time
         result = DateTime.compare(now, sleep_datetime) in [:eq, :gt]

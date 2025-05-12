@@ -79,12 +79,32 @@ defmodule Drowzee.Controller.SleepScheduleController do
     if day_of_week != "*" do
       Logger.info("Schedule is active only on days matching: #{day_of_week}")
     end
-
+    
+    # For schedules with nil wake time, check if they're already sleeping
+    # If they are, keep them asleep regardless of sleep time changes
+    manual_override_exists = case get_condition(axn, "ManualOverride") do
+      {:ok, condition} -> condition["status"] == "True"
+      _ -> false
+    end
+    
+    already_sleeping = case get_condition(axn, "Sleeping") do
+      {:ok, condition} -> condition["status"] == "True"
+      _ -> false
+    end
+    
+    # If schedule has no wake time, is already sleeping, and has no manual override,
+    # keep it asleep regardless of sleep time changes
+    force_naptime = (is_nil(wake_time) or wake_time == "") and 
+                    already_sleeping and 
+                    not manual_override_exists
+    
     case Drowzee.SleepChecker.naptime?(sleep_time, wake_time, timezone, day_of_week) do
       # We've removed the :inactive_day return value from the sleep checker
       # Now it always returns true/false for naptime
       {:ok, naptime} ->
-        %{axn | assigns: Map.put(axn.assigns, :naptime, naptime)}
+        # Force naptime to true if conditions are met
+        final_naptime = naptime or force_naptime
+        %{axn | assigns: Map.put(axn.assigns, :naptime, final_naptime)}
       {:error, reason} ->
         Logger.error("Error checking naptime: #{reason}")
         set_condition(axn, "Error", true, "InvalidSleepSchedule", "Invalid sleep schedule: #{reason}")
