@@ -23,6 +23,7 @@ defmodule DrowzeeWeb.HomeLive.Index do
       |> assign(:filtered_sleep_schedules, nil)
       |> assign(:namespace, nil)
       |> assign(:name, nil)
+      |> assign(:show_resources, false)
 
     {:ok, socket}
   end
@@ -205,6 +206,11 @@ defmodule DrowzeeWeb.HomeLive.Index do
         else: socket
 
     {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("toggle_resources", _params, socket) do
+    {:noreply, assign(socket, :show_resources, !socket.assigns.show_resources)}
   end
 
   @impl true
