@@ -81,10 +81,8 @@ defmodule Drowzee.Controller.SleepScheduleController do
     end
 
     case Drowzee.SleepChecker.naptime?(sleep_time, wake_time, timezone, day_of_week) do
-      {:ok, :inactive_day} ->
-        # If today is not an active day, skip processing (maintain current state)
-        Logger.info("Today is not an active day for this schedule, skipping state changes")
-        axn
+      # We've removed the :inactive_day return value from the sleep checker
+      # Now it always returns true/false for naptime
       {:ok, naptime} ->
         %{axn | assigns: Map.put(axn.assigns, :naptime, naptime)}
       {:error, reason} ->
