@@ -130,27 +130,20 @@ defmodule Drowzee.Controller.SleepScheduleController do
         # Trigger action from manual override
         {:awake, :no_transition, :sleep_override, _} -> initiate_sleep(axn)
         {:sleeping, :no_transition, :wake_up_override, _} -> initiate_wake_up(axn)
-        # Clear manual overrides once they're no longer needed, but only for schedules with wake times
+        # Preserve all manual overrides until explicitly removed
         {:awake, :no_transition, :wake_up_override, :not_naptime} -> 
-          if has_wake_time?(axn.resource) do
-            axn |> clear_manual_override()
-          else
-            # For schedules without wake times, preserve the manual override
-            Logger.debug("Preserving manual override for schedule without wake time")
-            axn
-          end
-        # Handle the case where a schedule is awake with a wake-up override but it's past sleep time
+          Logger.debug("Preserving manual wake-up override")
+          axn
+        # When a schedule is awake with a wake-up override and it's past sleep time,
+        # we respect the manual override and do nothing
         {:awake, :no_transition, :wake_up_override, :naptime} ->
-          Logger.info("Sleep time reached for schedule with wake-up override, initiating sleep")
-          # Clear the override and initiate sleep
-          axn 
-          |> clear_manual_override() 
-          |> initiate_sleep()
-        # For sleep overrides, we can clear them when it's naptime (sleep time reached)
-        # regardless of whether the schedule has a wake time or not
+          Logger.info("Sleep time reached but respecting manual wake-up override")
+          axn
+        # When a schedule is sleeping with a sleep override and it's naptime,
+        # we respect the manual override and do nothing
         {:sleeping, :no_transition, :sleep_override, :naptime} -> 
-          Logger.debug("Clearing manual sleep override as sleep time has been reached")
-          axn |> clear_manual_override()
+          Logger.debug("Sleep time reached but respecting manual sleep override")
+          axn
         # Trigger scheduled actions
         {:awake, :no_transition, :no_override, :naptime} -> initiate_sleep(axn)
         {:sleeping, :no_transition, :no_override, :not_naptime} -> initiate_wake_up(axn)
