@@ -130,9 +130,20 @@ defmodule Drowzee.Controller.SleepScheduleController do
         # Trigger action from manual override
         {:awake, :no_transition, :sleep_override, _} -> initiate_sleep(axn)
         {:sleeping, :no_transition, :wake_up_override, _} -> initiate_wake_up(axn)
-        # Clear manual overrides once they're no longer needed
-        {:awake, :no_transition, :wake_up_override, :not_naptime} -> axn |> clear_manual_override()
-        {:sleeping, :no_transition, :sleep_override, :naptime} -> axn |> clear_manual_override()
+        # Clear manual overrides once they're no longer needed, but only for schedules with wake times
+        {:awake, :no_transition, :wake_up_override, :not_naptime} -> 
+          if has_wake_time?(axn.resource) do
+            axn |> clear_manual_override()
+          else
+            # For schedules without wake times, preserve the manual override
+            Logger.debug("Preserving manual override for schedule without wake time")
+            axn
+          end
+        # For sleep overrides, we can clear them when it's naptime (sleep time reached)
+        # regardless of whether the schedule has a wake time or not
+        {:sleeping, :no_transition, :sleep_override, :naptime} -> 
+          Logger.debug("Clearing manual sleep override as sleep time has been reached")
+          axn |> clear_manual_override()
         # Trigger scheduled actions
         {:awake, :no_transition, :no_override, :naptime} -> initiate_sleep(axn)
         {:sleeping, :no_transition, :no_override, :not_naptime} -> initiate_wake_up(axn)
@@ -146,6 +157,12 @@ defmodule Drowzee.Controller.SleepScheduleController do
     else
       {:error, _error} -> axn # Conditions should be present except for the first event
     end
+  end
+
+  # Helper function to check if a schedule has a wake time defined
+  defp has_wake_time?(resource) do
+    wake_time = resource["spec"]["wakeTime"]
+    not (is_nil(wake_time) or wake_time == "")
   end
 
   defp clear_manual_override(axn) do
