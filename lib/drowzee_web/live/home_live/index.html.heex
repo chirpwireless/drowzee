@@ -200,11 +200,15 @@
       <% else %>
         <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center w-full">
           <h2 class="text-2xl font-bold text-gray-800 mt-2 ml-4 mb-4 sm:mb-0">
-            <.link navigate={~p"/#{@namespace}"}>
+            <.link navigate={~p"/"} class="text-blue-500 hover:text-blue-700 mr-2">
+              All Namespaces
+            </.link>
+            &gt;
+            <.link navigate={~p"/#{@namespace}"} class="mx-2">
               {String.capitalize(@namespace)} Namespace
             </.link>
             <%= if @name != nil do %>
-              / {String.capitalize(@name)}
+              &gt; <span class="ml-2">{String.capitalize(@name)}</span>
             <% end %>
           </h2>
           <%= if @sleep_schedules != [] do %>
