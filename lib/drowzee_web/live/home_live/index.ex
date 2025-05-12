@@ -272,11 +272,17 @@ defmodule DrowzeeWeb.HomeLive.Index do
     {sleep_schedules, deployments_by_name, statefulsets_by_name, cronjobs_by_name} =
       case socket.assigns.name do
         nil ->
+          # When no specific name is provided, get all schedules for the namespace
           schedules = Drowzee.K8s.sleep_schedules(socket.assigns.namespace)
           {schedules, %{}, %{}, %{}}
 
-        _name ->
-          schedules = Drowzee.K8s.sleep_schedules(socket.assigns.namespace)
+        name ->
+          # When a specific name is provided, fetch only that schedule directly
+          # This is much more efficient than fetching all schedules and filtering
+          schedules = case Drowzee.K8s.get_sleep_schedule(name, socket.assigns.namespace) do
+            {:ok, schedule} -> [schedule]
+            {:error, _} -> []
+          end
 
           deployments =
             schedules
