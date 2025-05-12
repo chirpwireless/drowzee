@@ -327,7 +327,7 @@ defmodule DrowzeeWeb.HomeLive.Index do
         # On main page: fetch all schedules once and calculate everything
         socket.assigns.namespace == nil ->
           # Get all schedules for the main page (single API call)
-          all_schedules = Drowzee.K8s.sleep_schedules(nil)
+          all_schedules = Drowzee.K8s.sleep_schedules(:all)
 
           # Extract unique namespaces
           namespaces =
