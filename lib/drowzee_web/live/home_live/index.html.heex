@@ -39,19 +39,19 @@
                   Schedule: {String.capitalize(@name)}
                 </h3>
                 <.link
-                  navigate={~p"/#{@namespace}"}
-                  class="flex text-gray-800 hover:text-black px-3 py-2 rounded-xl transition-all duration-200 bg-purple-50 bg-opacity-70 hover:bg-opacity-100 text-sm truncate shadow-sm hover:shadow border-l-2 border-purple-400 mb-2"
-                >
-                  <span class="truncate flex items-center">
-                    <span class="mr-1">↩</span> to {String.capitalize(@namespace)}
-                  </span>
-                </.link>
-                <.link
                   navigate={~p"/"}
                   class="flex text-gray-800 hover:text-black px-3 py-2 rounded-xl transition-all duration-200 bg-blue-50 bg-opacity-70 hover:bg-opacity-100 text-sm truncate shadow-sm hover:shadow border-l-2 border-blue-400 mb-2"
                 >
                   <span class="truncate flex items-center">
                     <span class="mr-1">🌐</span> to All Namespaces
+                  </span>
+                </.link>
+                <.link
+                  navigate={~p"/#{@namespace}"}
+                  class="flex text-gray-800 hover:text-black px-3 py-2 rounded-xl transition-all duration-200 bg-purple-50 bg-opacity-70 hover:bg-opacity-100 text-sm truncate shadow-sm hover:shadow border-l-2 border-purple-400 mb-2"
+                >
+                  <span class="truncate flex items-center">
+                    <span class="mr-1">↩</span> to {String.capitalize(@namespace)}
                   </span>
                 </.link>
               <% @namespace != nil and @name == nil -> %>

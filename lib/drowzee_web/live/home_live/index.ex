@@ -6,13 +6,13 @@ defmodule DrowzeeWeb.HomeLive.Index do
 
   # Refresh interval in milliseconds (5 minutes)
   @refresh_interval 300_000
-  
+
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
       # Subscribe to PubSub updates
       Phoenix.PubSub.subscribe(Drowzee.PubSub, "sleep_schedule:updates")
-      
+
       # Schedule periodic refresh to prevent connection issues
       Process.send_after(self(), :refresh_schedules, @refresh_interval)
     end
@@ -253,16 +253,16 @@ defmodule DrowzeeWeb.HomeLive.Index do
     Logger.debug("LiveView: Received sleep schedule update")
     {:noreply, load_sleep_schedules(socket)}
   end
-  
+
   @impl true
   def handle_info(:refresh_schedules, socket) do
     Logger.debug("LiveView: Performing periodic refresh of sleep schedules")
-    
+
     # Schedule the next refresh
     if connected?(socket) do
       Process.send_after(self(), :refresh_schedules, @refresh_interval)
     end
-    
+
     # Reload the schedules
     {:noreply, load_sleep_schedules(socket)}
   end
@@ -279,10 +279,11 @@ defmodule DrowzeeWeb.HomeLive.Index do
         name ->
           # When a specific name is provided, fetch only that schedule directly
           # This is much more efficient than fetching all schedules and filtering
-          schedules = case Drowzee.K8s.get_sleep_schedule(name, socket.assigns.namespace) do
-            {:ok, schedule} -> [schedule]
-            {:error, _} -> []
-          end
+          schedules =
+            case Drowzee.K8s.get_sleep_schedule(name, socket.assigns.namespace) do
+              {:ok, schedule} -> [schedule]
+              {:error, _} -> []
+            end
 
           deployments =
             schedules
@@ -327,17 +328,17 @@ defmodule DrowzeeWeb.HomeLive.Index do
         socket.assigns.namespace == nil ->
           # Get all schedules for the main page (single API call)
           all_schedules = Drowzee.K8s.sleep_schedules(nil)
-          
+
           # Extract unique namespaces
           namespaces =
             all_schedules
             |> Enum.map(fn schedule -> schedule["metadata"]["namespace"] end)
             |> Enum.uniq()
             |> Enum.sort()
-          
+
           # Calculate all namespace statuses at once
           {namespaces, calculate_namespace_statuses(all_schedules), nil}
-          
+
         # On namespace page: we already have the schedules from above
         true ->
           # Reuse the already fetched schedules to calculate namespace status
@@ -407,10 +408,11 @@ defmodule DrowzeeWeb.HomeLive.Index do
 
   # Calculate the status for a single namespace based on its schedules
   defp calculate_namespace_status([]), do: "disabled"
+
   defp calculate_namespace_status(schedules) do
     # Filter enabled schedules first - use pattern matching for better performance
     enabled_schedules = Enum.reject(schedules, &(Map.get(&1["spec"], "enabled") == false))
-    
+
     # Early return if no enabled schedules
     if enabled_schedules == [] do
       "disabled"
@@ -418,22 +420,23 @@ defmodule DrowzeeWeb.HomeLive.Index do
       # Check sleeping status - use fast enumeration with early termination
       # First check if any schedule is awake (not sleeping)
       case Enum.find(enabled_schedules, fn schedule ->
-        get_condition(schedule, "Sleeping")["status"] != "True"
-      end) do
+             get_condition(schedule, "Sleeping")["status"] != "True"
+           end) do
         # If we found an awake schedule
-        %{} -> 
+        %{} ->
           # Check if any schedule is sleeping
           case Enum.find(enabled_schedules, fn schedule ->
-            get_condition(schedule, "Sleeping")["status"] == "True"
-          end) do
+                 get_condition(schedule, "Sleeping")["status"] == "True"
+               end) do
             # If we found a sleeping schedule, it's mixed
             %{} -> "mixed"
             # If no sleeping schedules found, all are awake
             nil -> "awake"
           end
-        
+
         # If we didn't find any awake schedule, all are sleeping
-        nil -> "sleeping"
+        nil ->
+          "sleeping"
       end
     end
   end
