@@ -139,6 +139,13 @@ defmodule Drowzee.Controller.SleepScheduleController do
             Logger.debug("Preserving manual override for schedule without wake time")
             axn
           end
+        # Handle the case where a schedule is awake with a wake-up override but it's past sleep time
+        {:awake, :no_transition, :wake_up_override, :naptime} ->
+          Logger.info("Sleep time reached for schedule with wake-up override, initiating sleep")
+          # Clear the override and initiate sleep
+          axn 
+          |> clear_manual_override() 
+          |> initiate_sleep()
         # For sleep overrides, we can clear them when it's naptime (sleep time reached)
         # regardless of whether the schedule has a wake time or not
         {:sleeping, :no_transition, :sleep_override, :naptime} -> 
