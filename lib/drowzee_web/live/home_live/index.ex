@@ -14,16 +14,17 @@ defmodule DrowzeeWeb.HomeLive.Index do
       Phoenix.PubSub.subscribe(Drowzee.PubSub, "sleep_schedule:updates")
 
       # Schedule periodic refresh to prevent connection issues
-      Process.send_after(self(), :refresh_schedules, @refresh_interval)
+      Process.send_after(self(), :refresh, @refresh_interval)
     end
 
     socket =
       socket
-      |> assign(:search, "")
-      |> assign(:filtered_sleep_schedules, nil)
       |> assign(:namespace, nil)
       |> assign(:name, nil)
-      |> assign(:show_resources, false)
+      |> assign(:search, "")
+      |> assign(:filtered_sleep_schedules, nil)
+      |> assign(:visible_schedules, MapSet.new())
+      |> load_sleep_schedules()
 
     {:ok, socket}
   end
@@ -209,8 +210,17 @@ defmodule DrowzeeWeb.HomeLive.Index do
   end
 
   @impl true
-  def handle_event("toggle_resources", _params, socket) do
-    {:noreply, assign(socket, :show_resources, !socket.assigns.show_resources)}
+  def handle_event("toggle_resources", %{"id" => schedule_id}, socket) do
+    visible_schedules = socket.assigns.visible_schedules
+
+    updated_visible_schedules =
+      if MapSet.member?(visible_schedules, schedule_id) do
+        MapSet.delete(visible_schedules, schedule_id)
+      else
+        MapSet.put(visible_schedules, schedule_id)
+      end
+
+    {:noreply, assign(socket, :visible_schedules, updated_visible_schedules)}
   end
 
   @impl true
