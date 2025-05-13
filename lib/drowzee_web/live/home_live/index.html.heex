@@ -373,6 +373,25 @@
             </div>
           </div>
 
+          <%= if get_condition(sleep_schedule, "Error")["status"] == "True" do %>
+            <div class="mt-4 bg-red-50 border border-red-200 rounded-lg p-3 shadow-sm">
+              <div class="flex items-start">
+                <div class="flex-shrink-0">
+                  <svg class="h-5 w-5 text-red-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                  </svg>
+                </div>
+                <div class="ml-3">
+                  <h3 class="text-sm font-medium text-red-800">Error: {get_condition(sleep_schedule, "Error")["reason"]}</h3>
+                  <div class="mt-1 text-sm text-red-700">
+                    <p>{get_condition(sleep_schedule, "Error")["message"]}</p>
+                    <p class="text-xs mt-1 text-red-600">Last occurred: {last_transaction_time(sleep_schedule, "Error")}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          <% end %>
+
           <div class="text-gray-600 mt-4">
             🕒 <strong>Schedule:</strong>
             <div class="mt-2 bg-gray-50 p-3 rounded-lg border border-gray-200 shadow-sm">
@@ -471,13 +490,23 @@
                     <li class="bg-gray-100 rounded-lg px-3 py-1 text-sm">
                       <% d = @deployments_by_name[deployment["name"]] %>
                       <%= if @name do %>
-                        <%= if d && (Map.get(d["spec"], "replicas", 0) > 0) do %>
-                          🚀
-                        <% else %>
-                          💤
+                        <%= cond do %>
+                          <% d && d["metadata"]["annotations"] && d["metadata"]["annotations"]["drowzee.chirpwireless.io/scale-failed"] == "true" -> %>
+                            <span title={d["metadata"]["annotations"]["drowzee.chirpwireless.io/scale-error"] || "Failed to scale"} class="text-red-500">⚠️</span>
+                          <% d && (Map.get(d["spec"], "replicas", 0) > 0) -> %>
+                            🚀
+                          <% true -> %>
+                            💤
                         <% end %>
                       <% end %>
                       <span class="ml-1">{deployment["name"]}</span>
+                      <%= if d && d["metadata"]["annotations"] && d["metadata"]["annotations"]["drowzee.chirpwireless.io/scale-failed"] == "true" do %>
+                        <span class="ml-1 text-red-500" title={d["metadata"]["annotations"]["drowzee.chirpwireless.io/scale-error"] || "Failed to scale"}>
+                          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 inline" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                          </svg>
+                        </span>
+                      <% end %>
                     </li>
                   <% end %>
                 </ul>
@@ -492,13 +521,23 @@
                     <li class="bg-gray-100 rounded-lg px-3 py-1 text-sm">
                       <% s = @statefulsets_by_name[statefulset["name"]] %>
                       <%= if @name do %>
-                        <%= if s && (Map.get(s["spec"], "replicas", 0) > 0) do %>
-                          🚀
-                        <% else %>
-                          💤
+                        <%= cond do %>
+                          <% s && s["metadata"]["annotations"] && s["metadata"]["annotations"]["drowzee.chirpwireless.io/scale-failed"] == "true" -> %>
+                            <span title={s["metadata"]["annotations"]["drowzee.chirpwireless.io/scale-error"] || "Failed to scale"} class="text-red-500">⚠️</span>
+                          <% s && (Map.get(s["spec"], "replicas", 0) > 0) -> %>
+                            🚀
+                          <% true -> %>
+                            💤
                         <% end %>
                       <% end %>
                       <span class="ml-1">{statefulset["name"]}</span>
+                      <%= if s && s["metadata"]["annotations"] && s["metadata"]["annotations"]["drowzee.chirpwireless.io/scale-failed"] == "true" do %>
+                        <span class="ml-1 text-red-500" title={s["metadata"]["annotations"]["drowzee.chirpwireless.io/scale-error"] || "Failed to scale"}>
+                          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 inline" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                          </svg>
+                        </span>
+                      <% end %>
                     </li>
                   <% end %>
                 </ul>

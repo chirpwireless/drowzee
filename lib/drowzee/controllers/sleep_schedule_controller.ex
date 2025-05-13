@@ -298,14 +298,30 @@ defmodule Drowzee.Controller.SleepScheduleController do
       
       {:partial, results, errors} ->
         # Some operations failed, but we continue processing
-        # Log the errors
-        Enum.each(errors, fn {:error, error_msg} ->
-          Logger.error("Scaling operation partially failed: #{error_msg}")
-        end)
+        # Log the errors and update failed resources in Kubernetes
+        failed_resources = Enum.map(errors, fn 
+          {:error, failed_resource, error_msg} ->
+            Logger.error("Scaling operation partially failed: #{error_msg}")
+            # Update the failed resource in Kubernetes to mark it as failed
+            update_failed_resource(failed_resource)
+            {failed_resource, error_msg}
+          {:error, error_msg} ->
+            Logger.error("Scaling operation partially failed: #{error_msg}")
+            nil
+        end) |> Enum.reject(&is_nil/1)
         
         # Set error condition on the sleep schedule but continue processing
-        resource = set_error_condition(resource, "ScaleFailed", 
-          "Some resources failed to scale, but processing continued. Check logs for details.")
+        error_details = if Enum.empty?(failed_resources) do
+          "Some resources failed to scale, but processing continued. Check logs for details."
+        else
+          # Include specific resource names in the error message
+          resource_names = failed_resources
+            |> Enum.map(fn {res, _} -> res["metadata"]["name"] end)
+            |> Enum.join(", ")
+          "Failed to scale resources: #{resource_names}. Processing continued with other resources."
+        end
+        
+        resource = set_error_condition(resource, "ScaleFailed", error_details)
         
         # Return partial success to continue with other operations
         {:partial, results, errors, resource}
@@ -359,7 +375,8 @@ defmodule Drowzee.Controller.SleepScheduleController do
       namespace: resource["metadata"]["namespace"])
     
     # Create a status subresource update operation
-    operation = K8s.Client.update_status(resource)
+    # Use the proper function to update the status subresource
+    operation = K8s.Client.update(resource, subresource: "status")
     
     # Execute the update
     case K8s.Client.run(Drowzee.K8s.conn(), operation) do
@@ -373,6 +390,37 @@ defmodule Drowzee.Controller.SleepScheduleController do
   rescue
     e ->
       Logger.error("Error updating resource status: #{inspect(e)}")
+      {:error, e}
+  end
+  
+  # Update a failed resource in Kubernetes to mark it as failed
+  defp update_failed_resource(resource) do
+    kind = resource["kind"]
+    name = resource["metadata"]["name"]
+    namespace = resource["metadata"]["namespace"]
+    
+    Logger.info("Updating failed resource in Kubernetes", 
+      kind: kind, name: name, namespace: namespace)
+    
+    # Create an update operation for the resource
+    operation = K8s.Client.update(resource)
+    
+    # Execute the update
+    case K8s.Client.run(Drowzee.K8s.conn(), operation) do
+      {:ok, updated} ->
+        Logger.info("Successfully marked resource as failed", 
+          kind: kind, name: name, namespace: namespace)
+        {:ok, updated}
+      {:error, reason} ->
+        Logger.error("Failed to update resource with failure status: #{inspect(reason)}", 
+          kind: kind, name: name, namespace: namespace)
+        {:error, reason}
+    end
+  rescue
+    e ->
+      Logger.error("Error updating failed resource: #{inspect(e)}", 
+        kind: resource["kind"] || "unknown", 
+        name: resource["metadata"]["name"] || "unknown")
       {:error, e}
   end
 

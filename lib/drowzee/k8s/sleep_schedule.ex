@@ -113,15 +113,36 @@ defmodule Drowzee.K8s.SleepSchedule do
           Enum.map(deployments, fn deployment ->
             try do
               deployment = Deployment.save_original_replicas(deployment)
-              Deployment.scale_deployment(deployment, 0)
+              case Deployment.scale_deployment(deployment, 0) do
+                {:ok, scaled_deployment} -> 
+                  {:ok, scaled_deployment}
+                {:error, reason} -> 
+                  name = deployment["metadata"]["name"]
+                  Logger.error("Error scaling down deployment: #{inspect(reason)}", name: name)
+                  # Mark this specific resource as failed
+                  failed_deployment = put_in(deployment, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-failed"], "true")
+                  failed_deployment = put_in(failed_deployment, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-error"], 
+                    "Failed to scale: #{inspect(reason)}")
+                  {:error, failed_deployment, "Failed to scale down deployment #{name}: #{inspect(reason)}"}
+              end
             rescue
               e ->
-                Logger.error("Error scaling down deployment: #{inspect(e)}", name: deployment["metadata"]["name"])
-                {:error, "Failed to scale down deployment #{deployment["metadata"]["name"]}: #{inspect(e)}"}
+                name = deployment["metadata"]["name"]
+                Logger.error("Error scaling down deployment: #{inspect(e)}", name: name)
+                # Mark this specific resource as failed
+                failed_deployment = put_in(deployment, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-failed"], "true")
+                failed_deployment = put_in(failed_deployment, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-error"], 
+                  "Exception: #{inspect(e)}")
+                {:error, failed_deployment, "Failed to scale down deployment #{name}: #{inspect(e)}"}
             catch
               kind, reason ->
-                Logger.error("Error scaling down deployment: #{inspect(reason)}", name: deployment["metadata"]["name"])
-                {:error, "Failed to scale down deployment #{deployment["metadata"]["name"]}: #{inspect(reason)}"}
+                name = deployment["metadata"]["name"]
+                Logger.error("Error scaling down deployment: #{inspect(reason)}", name: name)
+                # Mark this specific resource as failed
+                failed_deployment = put_in(deployment, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-failed"], "true")
+                failed_deployment = put_in(failed_deployment, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-error"], 
+                  "Caught #{kind}: #{inspect(reason)}")
+                {:error, failed_deployment, "Failed to scale down deployment #{name}: #{inspect(reason)}"}
             end
           end)
         
@@ -151,15 +172,36 @@ defmodule Drowzee.K8s.SleepSchedule do
           Enum.map(statefulsets, fn statefulset ->
             try do
               statefulset = StatefulSet.save_original_replicas(statefulset)
-              StatefulSet.scale_statefulset(statefulset, 0)
+              case StatefulSet.scale_statefulset(statefulset, 0) do
+                {:ok, scaled_statefulset} -> 
+                  {:ok, scaled_statefulset}
+                {:error, reason} -> 
+                  name = statefulset["metadata"]["name"]
+                  Logger.error("Error scaling down statefulset: #{inspect(reason)}", name: name)
+                  # Mark this specific resource as failed
+                  failed_statefulset = put_in(statefulset, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-failed"], "true")
+                  failed_statefulset = put_in(failed_statefulset, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-error"], 
+                    "Failed to scale: #{inspect(reason)}")
+                  {:error, failed_statefulset, "Failed to scale down statefulset #{name}: #{inspect(reason)}"}
+              end
             rescue
               e ->
-                Logger.error("Error scaling down statefulset: #{inspect(e)}", name: statefulset["metadata"]["name"])
-                {:error, "Failed to scale down statefulset #{statefulset["metadata"]["name"]}: #{inspect(e)}"}
+                name = statefulset["metadata"]["name"]
+                Logger.error("Error scaling down statefulset: #{inspect(e)}", name: name)
+                # Mark this specific resource as failed
+                failed_statefulset = put_in(statefulset, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-failed"], "true")
+                failed_statefulset = put_in(failed_statefulset, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-error"], 
+                  "Exception: #{inspect(e)}")
+                {:error, failed_statefulset, "Failed to scale down statefulset #{name}: #{inspect(e)}"}
             catch
               kind, reason ->
-                Logger.error("Error scaling down statefulset: #{inspect(reason)}", name: statefulset["metadata"]["name"])
-                {:error, "Failed to scale down statefulset #{statefulset["metadata"]["name"]}: #{inspect(reason)}"}
+                name = statefulset["metadata"]["name"]
+                Logger.error("Error scaling down statefulset: #{inspect(reason)}", name: name)
+                # Mark this specific resource as failed
+                failed_statefulset = put_in(statefulset, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-failed"], "true")
+                failed_statefulset = put_in(failed_statefulset, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-error"], 
+                  "Caught #{kind}: #{inspect(reason)}")
+                {:error, failed_statefulset, "Failed to scale down statefulset #{name}: #{inspect(reason)}"}
             end
           end)
         
@@ -199,15 +241,39 @@ defmodule Drowzee.K8s.SleepSchedule do
         results = Enum.map(deployments, fn deployment ->
           try do
             original = Deployment.get_original_replicas(deployment)
-            Deployment.scale_deployment(deployment, original)
+            case Deployment.scale_deployment(deployment, original) do
+              {:ok, scaled_deployment} -> 
+                # Clear any previous failure annotations if they exist
+                scaled_deployment = pop_in(scaled_deployment, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-failed"]) |> elem(1)
+                scaled_deployment = pop_in(scaled_deployment, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-error"]) |> elem(1)
+                {:ok, scaled_deployment}
+              {:error, reason} -> 
+                name = deployment["metadata"]["name"]
+                Logger.error("Error scaling up deployment: #{inspect(reason)}", name: name)
+                # Mark this specific resource as failed
+                failed_deployment = put_in(deployment, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-failed"], "true")
+                failed_deployment = put_in(failed_deployment, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-error"], 
+                  "Failed to scale: #{inspect(reason)}")
+                {:error, failed_deployment, "Failed to scale up deployment #{name}: #{inspect(reason)}"}
+            end
           rescue
             e ->
-              Logger.error("Error scaling up deployment: #{inspect(e)}", name: deployment["metadata"]["name"])
-              {:error, "Failed to scale up deployment #{deployment["metadata"]["name"]}: #{inspect(e)}"}
+              name = deployment["metadata"]["name"]
+              Logger.error("Error scaling up deployment: #{inspect(e)}", name: name)
+              # Mark this specific resource as failed
+              failed_deployment = put_in(deployment, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-failed"], "true")
+              failed_deployment = put_in(failed_deployment, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-error"], 
+                "Exception: #{inspect(e)}")
+              {:error, failed_deployment, "Failed to scale up deployment #{name}: #{inspect(e)}"}
           catch
             kind, reason ->
-              Logger.error("Error scaling up deployment: #{inspect(reason)}", name: deployment["metadata"]["name"])
-              {:error, "Failed to scale up deployment #{deployment["metadata"]["name"]}: #{inspect(reason)}"}
+              name = deployment["metadata"]["name"]
+              Logger.error("Error scaling up deployment: #{inspect(reason)}", name: name)
+              # Mark this specific resource as failed
+              failed_deployment = put_in(deployment, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-failed"], "true")
+              failed_deployment = put_in(failed_deployment, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-error"], 
+                "Caught #{kind}: #{inspect(reason)}")
+              {:error, failed_deployment, "Failed to scale up deployment #{name}: #{inspect(reason)}"}
           end
         end)
         
@@ -237,15 +303,39 @@ defmodule Drowzee.K8s.SleepSchedule do
           Enum.map(statefulsets, fn statefulset ->
             try do
               original = StatefulSet.get_original_replicas(statefulset)
-              StatefulSet.scale_statefulset(statefulset, original)
+              case StatefulSet.scale_statefulset(statefulset, original) do
+                {:ok, scaled_statefulset} -> 
+                  # Clear any previous failure annotations if they exist
+                  scaled_statefulset = pop_in(scaled_statefulset, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-failed"]) |> elem(1)
+                  scaled_statefulset = pop_in(scaled_statefulset, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-error"]) |> elem(1)
+                  {:ok, scaled_statefulset}
+                {:error, reason} -> 
+                  name = statefulset["metadata"]["name"]
+                  Logger.error("Error scaling up statefulset: #{inspect(reason)}", name: name)
+                  # Mark this specific resource as failed
+                  failed_statefulset = put_in(statefulset, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-failed"], "true")
+                  failed_statefulset = put_in(failed_statefulset, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-error"], 
+                    "Failed to scale: #{inspect(reason)}")
+                  {:error, failed_statefulset, "Failed to scale up statefulset #{name}: #{inspect(reason)}"}
+              end
             rescue
               e ->
-                Logger.error("Error scaling up statefulset: #{inspect(e)}", name: statefulset["metadata"]["name"])
-                {:error, "Failed to scale up statefulset #{statefulset["metadata"]["name"]}: #{inspect(e)}"}
+                name = statefulset["metadata"]["name"]
+                Logger.error("Error scaling up statefulset: #{inspect(e)}", name: name)
+                # Mark this specific resource as failed
+                failed_statefulset = put_in(statefulset, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-failed"], "true")
+                failed_statefulset = put_in(failed_statefulset, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-error"], 
+                  "Exception: #{inspect(e)}")
+                {:error, failed_statefulset, "Failed to scale up statefulset #{name}: #{inspect(e)}"}
             catch
               kind, reason ->
-                Logger.error("Error scaling up statefulset: #{inspect(reason)}", name: statefulset["metadata"]["name"])
-                {:error, "Failed to scale up statefulset #{statefulset["metadata"]["name"]}: #{inspect(reason)}"}
+                name = statefulset["metadata"]["name"]
+                Logger.error("Error scaling up statefulset: #{inspect(reason)}", name: name)
+                # Mark this specific resource as failed
+                failed_statefulset = put_in(statefulset, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-failed"], "true")
+                failed_statefulset = put_in(failed_statefulset, ["metadata", "annotations", "drowzee.chirpwireless.io/scale-error"], 
+                  "Caught #{kind}: #{inspect(reason)}")
+                {:error, failed_statefulset, "Failed to scale up statefulset #{name}: #{inspect(reason)}"}
             end
           end)
         
