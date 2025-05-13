@@ -214,17 +214,6 @@ defmodule Drowzee.Controller.SleepScheduleController do
     end
   end
 
-  # Helper function to check if a schedule has a wake time defined
-  defp has_wake_time?(resource) do
-    wake_time = resource["spec"]["wakeTime"]
-    not (is_nil(wake_time) or wake_time == "")
-  end
-
-  defp clear_manual_override(axn) do
-    Logger.info("Clearing manual override")
-    set_condition(axn, "ManualOverride", false, "NoOverride", "No manual override in effect")
-  end
-
   defp initiate_sleep(axn) do
     Logger.info("Initiating sleep")
 
@@ -287,7 +276,7 @@ defmodule Drowzee.Controller.SleepScheduleController do
         # Nothing to process
         {false, state}
 
-      %{processing: false, queue: queue} = state ->
+      %{processing: false, queue: _} = state ->
         # Start processing
         {true, %{state | processing: true}}
     end)
@@ -509,13 +498,6 @@ defmodule Drowzee.Controller.SleepScheduleController do
         Logger.error("Failed to update resource status in Kubernetes API: #{inspect(error)}")
         {:error, error}
     end
-  end
-
-  # Extract error messages from missing resources
-  defp extract_missing_resource_messages(missing_resources) do
-    Enum.map(missing_resources, fn resource ->
-      "#{resource["kind"]} #{resource["name"]} not found in namespace #{resource["namespace"]}"
-    end)
   end
 
   # Add annotation for missing resources to the sleep schedule
