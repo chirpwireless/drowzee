@@ -497,25 +497,27 @@
                   <%= for deployment <- sleep_schedule["spec"]["deployments"] do %>
                     <li class="bg-gray-100 rounded-lg px-3 py-1 text-sm">
                       <% d = @deployments_by_name[deployment["name"]] %>
-                      <%= cond do %>
-                        <% is_nil(d) -> %>
-                          <span title="Resource not found in Kubernetes" class="text-red-500">
-                            ❓
-                          </span>
-                        <% d && d["metadata"]["annotations"] && d["metadata"]["annotations"]["drowzee.io/scale-failed"] == "true" -> %>
-                          <span
-                            title={
-                              d["metadata"]["annotations"]["drowzee.io/scale-error"] ||
-                                "Failed to scale"
-                            }
-                            class="text-amber-500"
-                          >
-                            ⚠️
-                          </span>
-                        <% d && (Map.get(d["spec"], "replicas", 0) > 0) -> %>
-                          🚀
-                        <% true -> %>
-                          💤
+                      <%= if @name do %>
+                        <%= cond do %>
+                          <% is_nil(d) -> %>
+                            <span title="Resource not found in Kubernetes" class="text-red-500">
+                              ❓
+                            </span>
+                          <% d && d["metadata"]["annotations"] && d["metadata"]["annotations"]["drowzee.io/scale-failed"] == "true" -> %>
+                            <span
+                              title={
+                                d["metadata"]["annotations"]["drowzee.io/scale-error"] ||
+                                  "Failed to scale"
+                              }
+                              class="text-amber-500"
+                            >
+                              ⚠️
+                            </span>
+                          <% d && (Map.get(d["spec"], "replicas", 0) > 0) -> %>
+                            🚀
+                          <% true -> %>
+                            💤
+                        <% end %>
                       <% end %>
                       <span class="ml-1">{deployment["name"]}</span>
                       <%= if d && d["metadata"]["annotations"] && d["metadata"]["annotations"]["drowzee.io/scale-failed"] == "true" do %>
@@ -553,25 +555,27 @@
                   <%= for statefulset <- sleep_schedule["spec"]["statefulsets"] || [] do %>
                     <li class="bg-gray-100 rounded-lg px-3 py-1 text-sm">
                       <% s = @statefulsets_by_name[statefulset["name"]] %>
-                      <%= cond do %>
-                        <% is_nil(s) -> %>
-                          <span title="Resource not found in Kubernetes" class="text-red-500">
-                            ❓
-                          </span>
-                        <% s && s["metadata"]["annotations"] && s["metadata"]["annotations"]["drowzee.io/scale-failed"] == "true" -> %>
-                          <span
-                            title={
-                              s["metadata"]["annotations"]["drowzee.io/scale-error"] ||
-                                "Failed to scale"
-                            }
-                            class="text-amber-500"
-                          >
-                            ⚠️
-                          </span>
-                        <% s && (Map.get(s["spec"], "replicas", 0) > 0) -> %>
-                          🚀
-                        <% true -> %>
-                          💤
+                      <%= if @name do %>
+                        <%= cond do %>
+                          <% is_nil(s) -> %>
+                            <span title="Resource not found in Kubernetes" class="text-red-500">
+                              ❓
+                            </span>
+                          <% s && s["metadata"]["annotations"] && s["metadata"]["annotations"]["drowzee.io/scale-failed"] == "true" -> %>
+                            <span
+                              title={
+                                s["metadata"]["annotations"]["drowzee.io/scale-error"] ||
+                                  "Failed to scale"
+                              }
+                              class="text-amber-500"
+                            >
+                              ⚠️
+                            </span>
+                          <% s && (Map.get(s["spec"], "replicas", 0) > 0) -> %>
+                            🚀
+                          <% true -> %>
+                            💤
+                        <% end %>
                       <% end %>
                       <span class="ml-1">{statefulset["name"]}</span>
                       <%= if s && s["metadata"]["annotations"] && s["metadata"]["annotations"]["drowzee.io/scale-failed"] == "true" do %>
@@ -609,15 +613,17 @@
                   <%= for cronjob <- sleep_schedule["spec"]["cronjobs"] || [] do %>
                     <li class="bg-gray-100 rounded-lg px-3 py-1 text-sm">
                       <% c = @cronjobs_by_name[cronjob["name"]] %>
-                      <%= cond do %>
-                        <% is_nil(c) -> %>
-                          <span title="Resource not found in Kubernetes" class="text-red-500">
-                            ❓
-                          </span>
-                        <% c && Map.get(c["spec"], "suspend", false) == false -> %>
-                          🚀
-                        <% true -> %>
-                          💤
+                      <%= if @name do %>
+                        <%= cond do %>
+                          <% is_nil(c) -> %>
+                            <span title="Resource not found in Kubernetes" class="text-red-500">
+                              ❓
+                            </span>
+                          <% c && Map.get(c["spec"], "suspend", false) == false -> %>
+                            🚀
+                          <% true -> %>
+                            💤
+                        <% end %>
                       <% end %>
                       <span class="ml-1">{cronjob["name"]}</span>
                     </li>

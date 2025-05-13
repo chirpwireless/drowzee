@@ -15,7 +15,10 @@ defmodule Drowzee.K8s do
   end
 
   def get_sleep_schedule(name, namespace) do
-    K8s.Client.get("drowzee.challengr.io/v1beta1", "SleepSchedule", name: name, namespace: namespace)
+    K8s.Client.get("drowzee.challengr.io/v1beta1", "SleepSchedule",
+      name: name,
+      namespace: namespace
+    )
     |> K8s.Client.put_conn(conn())
     |> K8s.Client.run()
   end
@@ -33,7 +36,8 @@ defmodule Drowzee.K8s do
       "WakeUp",
       "Force deployments to wake up"
     )
-    |> decrement_observed_generation() # Make sure we handle the modify event rather then wait for a reconcile
+    # Make sure we handle the modify event rather then wait for a reconcile
+    |> decrement_observed_generation()
     |> Bonny.Resource.apply_status(conn(), force: true)
   end
 
@@ -45,7 +49,8 @@ defmodule Drowzee.K8s do
       "Sleep",
       "Force deployments to sleep"
     )
-    |> decrement_observed_generation() # Make sure we handle the modify event rather then wait for a reconcile
+    # Make sure we handle the modify event rather then wait for a reconcile
+    |> decrement_observed_generation()
     |> Bonny.Resource.apply_status(conn(), force: true)
   end
 
@@ -57,7 +62,8 @@ defmodule Drowzee.K8s do
       "NoOverride",
       "No manual override in effect"
     )
-    |> decrement_observed_generation() # Make sure we handle the modify event rather then wait for a reconcile
+    # Make sure we handle the modify event rather then wait for a reconcile
+    |> decrement_observed_generation()
     |> Bonny.Resource.apply_status(conn(), force: true)
   end
 
@@ -74,6 +80,7 @@ defmodule Drowzee.K8s do
     name = "drowzee"
     namespace = drowzee_namespace()
     Logger.debug("Fetching drowzee ingress", name: name, drowzee_namespace: namespace)
+
     K8s.Client.get("networking.k8s.io/v1", :ingress, name: name, namespace: namespace)
     |> K8s.Client.put_conn(conn())
     |> K8s.Client.run()
@@ -83,6 +90,7 @@ defmodule Drowzee.K8s do
 
   def drowzee_namespace() do
     namespace_path = Path.join(@default_service_account_path, "namespace")
+
     case File.read(namespace_path) do
       {:ok, namespace} -> namespace
       _ -> Application.get_env(:drowzee, :drowzee_namespace, "default")
@@ -91,6 +99,7 @@ defmodule Drowzee.K8s do
 
   def get_deployment(name, namespace) do
     Logger.debug("Fetching deployment", name: name)
+
     K8s.Client.get("apps/v1", :deployment, name: name, namespace: namespace)
     |> K8s.Client.put_conn(conn())
     |> K8s.Client.run()
@@ -98,6 +107,7 @@ defmodule Drowzee.K8s do
 
   def get_statefulset(name, namespace) do
     Logger.debug("Fetching statefulset", name: name)
+
     K8s.Client.get("apps/v1", :statefulset, name: name, namespace: namespace)
     |> K8s.Client.put_conn(conn())
     |> K8s.Client.run()
@@ -105,6 +115,7 @@ defmodule Drowzee.K8s do
 
   def get_cronjob(name, namespace) do
     Logger.debug("Fetching cronjob", name: name)
+
     K8s.Client.get("batch/v1", :cronjob, name: name, namespace: namespace)
     |> K8s.Client.put_conn(conn())
     |> K8s.Client.run()
@@ -122,6 +133,7 @@ defmodule Drowzee.K8s do
     deployment_names
     |> Enum.map(fn deployment ->
       name = deployment["name"]
+
       case get_deployment(name, namespace) do
         {:ok, deployment} -> deployment
         {:error, _} -> nil
@@ -138,6 +150,7 @@ defmodule Drowzee.K8s do
     statefulset_names
     |> Enum.map(fn statefulset ->
       name = statefulset["name"]
+
       case get_statefulset(name, namespace) do
         {:ok, statefulset} -> statefulset
         {:error, _} -> nil
@@ -154,6 +167,7 @@ defmodule Drowzee.K8s do
     cronjob_names
     |> Enum.map(fn cronjob ->
       name = cronjob["name"]
+
       case get_cronjob(name, namespace) do
         {:ok, cronjob} -> cronjob
         {:error, _} -> nil

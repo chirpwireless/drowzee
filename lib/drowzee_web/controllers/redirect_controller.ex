@@ -6,11 +6,15 @@ defmodule DrowzeeWeb.RedirectController do
   def redirect_to_sleep_schedule(conn, _params) do
     Logger.info("Finding sleep schedule for host: #{conn.host}")
 
-    sleep_schedule = (Drowzee.K8s.sleep_schedules() || [])
-      |> Enum.find(fn sleep_schedule -> Enum.any?((sleep_schedule["status"]["hosts"] || []), &(&1 == conn.host)) end)
+    sleep_schedule =
+      (Drowzee.K8s.sleep_schedules() || [])
+      |> Enum.find(fn sleep_schedule ->
+        Enum.any?(sleep_schedule["status"]["hosts"] || [], &(&1 == conn.host))
+      end)
 
     if sleep_schedule == nil do
       Logger.warning("No sleep schedule found for host: #{conn.host}.")
+
       if Drowzee.Config.has_cluster_role?() do
         Logger.warning("Redirecting to '/all'")
         redirect(conn, to: "/all")
@@ -22,7 +26,11 @@ defmodule DrowzeeWeb.RedirectController do
     else
       namespace = sleep_schedule["metadata"]["namespace"]
       name = sleep_schedule["metadata"]["name"]
-      Logger.info("Found sleep schedule: '#{namespace}/#{name}' for host '#{conn.host}'. Redirecting to '/#{namespace}/#{name}'")
+
+      Logger.info(
+        "Found sleep schedule: '#{namespace}/#{name}' for host '#{conn.host}'. Redirecting to '/#{namespace}/#{name}'"
+      )
+
       redirect(conn, to: "/#{namespace}/#{name}")
     end
   end
