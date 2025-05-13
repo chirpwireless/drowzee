@@ -373,8 +373,6 @@
             </div>
           </div>
 
-
-
           <div class="text-gray-600 mt-4">
             🕒 <strong>Schedule:</strong>
             <div class="mt-2 bg-gray-50 p-3 rounded-lg border border-gray-200 shadow-sm">
@@ -500,25 +498,25 @@
                     <li class="bg-gray-100 rounded-lg px-3 py-1 text-sm">
                       <% d = @deployments_by_name[deployment["name"]] %>
                       <%= cond do %>
-                          <% is_nil(d) -> %>
-                            <span title="Resource not found in Kubernetes" class="text-red-500">
-                              ❓
-                            </span>
-                          <% d && d["metadata"]["annotations"] && d["metadata"]["annotations"]["drowzee.io/scale-failed"] == "true" -> %>
-                            <span
-                              title={
-                                d["metadata"]["annotations"]["drowzee.io/scale-error"] ||
-                                  "Failed to scale"
-                              }
-                              class="text-amber-500"
-                            >
-                              ⚠️
-                            </span>
-                          <% d && (Map.get(d["spec"], "replicas", 0) > 0) -> %>
-                            🚀
-                          <% true -> %>
-                            💤
-                        <% end %>
+                        <% is_nil(d) -> %>
+                          <span title="Resource not found in Kubernetes" class="text-red-500">
+                            ❓
+                          </span>
+                        <% d && d["metadata"]["annotations"] && d["metadata"]["annotations"]["drowzee.io/scale-failed"] == "true" -> %>
+                          <span
+                            title={
+                              d["metadata"]["annotations"]["drowzee.io/scale-error"] ||
+                                "Failed to scale"
+                            }
+                            class="text-amber-500"
+                          >
+                            ⚠️
+                          </span>
+                        <% d && (Map.get(d["spec"], "replicas", 0) > 0) -> %>
+                          🚀
+                        <% true -> %>
+                          💤
+                      <% end %>
                       <span class="ml-1">{deployment["name"]}</span>
                       <%= if d && d["metadata"]["annotations"] && d["metadata"]["annotations"]["drowzee.io/scale-failed"] == "true" do %>
                         <span
@@ -556,25 +554,25 @@
                     <li class="bg-gray-100 rounded-lg px-3 py-1 text-sm">
                       <% s = @statefulsets_by_name[statefulset["name"]] %>
                       <%= cond do %>
-                          <% is_nil(s) -> %>
-                            <span title="Resource not found in Kubernetes" class="text-red-500">
-                              ❓
-                            </span>
-                          <% s && s["metadata"]["annotations"] && s["metadata"]["annotations"]["drowzee.io/scale-failed"] == "true" -> %>
-                            <span
-                              title={
-                                s["metadata"]["annotations"]["drowzee.io/scale-error"] ||
-                                  "Failed to scale"
-                              }
-                              class="text-amber-500"
-                            >
-                              ⚠️
-                            </span>
-                          <% s && (Map.get(s["spec"], "replicas", 0) > 0) -> %>
-                            🚀
-                          <% true -> %>
-                            💤
-                        <% end %>
+                        <% is_nil(s) -> %>
+                          <span title="Resource not found in Kubernetes" class="text-red-500">
+                            ❓
+                          </span>
+                        <% s && s["metadata"]["annotations"] && s["metadata"]["annotations"]["drowzee.io/scale-failed"] == "true" -> %>
+                          <span
+                            title={
+                              s["metadata"]["annotations"]["drowzee.io/scale-error"] ||
+                                "Failed to scale"
+                            }
+                            class="text-amber-500"
+                          >
+                            ⚠️
+                          </span>
+                        <% s && (Map.get(s["spec"], "replicas", 0) > 0) -> %>
+                          🚀
+                        <% true -> %>
+                          💤
+                      <% end %>
                       <span class="ml-1">{statefulset["name"]}</span>
                       <%= if s && s["metadata"]["annotations"] && s["metadata"]["annotations"]["drowzee.io/scale-failed"] == "true" do %>
                         <span
@@ -612,15 +610,15 @@
                     <li class="bg-gray-100 rounded-lg px-3 py-1 text-sm">
                       <% c = @cronjobs_by_name[cronjob["name"]] %>
                       <%= cond do %>
-                          <% is_nil(c) -> %>
-                            <span title="Resource not found in Kubernetes" class="text-red-500">
-                              ❓
-                            </span>
-                          <% c && Map.get(c["spec"], "suspend", false) == false -> %>
-                            🚀
-                          <% true -> %>
-                            💤
-                        <% end %>
+                        <% is_nil(c) -> %>
+                          <span title="Resource not found in Kubernetes" class="text-red-500">
+                            ❓
+                          </span>
+                        <% c && Map.get(c["spec"], "suspend", false) == false -> %>
+                          🚀
+                        <% true -> %>
+                          💤
+                      <% end %>
                       <span class="ml-1">{cronjob["name"]}</span>
                     </li>
                   <% end %>
@@ -631,16 +629,16 @@
 
           <%= if get_condition(sleep_schedule, "Error")["status"] == "True" do %>
             <div class="grid grid-cols-2 sm:grid-cols-1 gap-4 mt-6 text-sm">
-              <div class="p-3 bg-gray-50 rounded-lg shadow-sm border">
+              <div class="p-3 bg-red-50 rounded-lg shadow-sm border border-red-200">
                 <div class="flex justify-between items-center">
-                  <div class="font-semibold text-gray-800 mb-1">
+                  <div class="font-semibold text-red-700 mb-1">
                     🚨 Error
                   </div>
-                  <div class="text-gray-800 mb-1">
+                  <div class="text-red-600 mb-1">
                     {last_transaction_time(sleep_schedule, "Error")}
                   </div>
                 </div>
-                <div class="text-gray-500 text-xs mt-1">
+                <div class="text-red-600 text-xs mt-1">
                   {get_condition(sleep_schedule, "Error")["message"]}
                 </div>
               </div>
