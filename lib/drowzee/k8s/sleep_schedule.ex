@@ -111,10 +111,33 @@ defmodule Drowzee.K8s.SleepSchedule do
       {:ok, deployments} ->
         results =
           Enum.map(deployments, fn deployment ->
-            deployment = Deployment.save_original_replicas(deployment)
-            Deployment.scale_deployment(deployment, 0)
+            try do
+              deployment = Deployment.save_original_replicas(deployment)
+              Deployment.scale_deployment(deployment, 0)
+            rescue
+              e ->
+                Logger.error("Error scaling down deployment: #{inspect(e)}", name: deployment["metadata"]["name"])
+                {:error, "Failed to scale down deployment #{deployment["metadata"]["name"]}: #{inspect(e)}"}
+            catch
+              kind, reason ->
+                Logger.error("Error scaling down deployment: #{inspect(reason)}", name: deployment["metadata"]["name"])
+                {:error, "Failed to scale down deployment #{deployment["metadata"]["name"]}: #{inspect(reason)}"}
+            end
           end)
-        {:ok, results}
+        
+        # Check if any operations failed
+        errors = Enum.filter(results, fn
+          {:error, _} -> true
+          _ -> false
+        end)
+        
+        if Enum.empty?(errors) do
+          {:ok, results}
+        else
+          # Return both successful results and errors
+          {:partial, results, errors}
+        end
+        
       {:error, error} ->
         {:error, error}
     end
@@ -126,10 +149,33 @@ defmodule Drowzee.K8s.SleepSchedule do
       {:ok, statefulsets} ->
         results =
           Enum.map(statefulsets, fn statefulset ->
-            statefulset = StatefulSet.save_original_replicas(statefulset)
-            StatefulSet.scale_statefulset(statefulset, 0)
+            try do
+              statefulset = StatefulSet.save_original_replicas(statefulset)
+              StatefulSet.scale_statefulset(statefulset, 0)
+            rescue
+              e ->
+                Logger.error("Error scaling down statefulset: #{inspect(e)}", name: statefulset["metadata"]["name"])
+                {:error, "Failed to scale down statefulset #{statefulset["metadata"]["name"]}: #{inspect(e)}"}
+            catch
+              kind, reason ->
+                Logger.error("Error scaling down statefulset: #{inspect(reason)}", name: statefulset["metadata"]["name"])
+                {:error, "Failed to scale down statefulset #{statefulset["metadata"]["name"]}: #{inspect(reason)}"}
+            end
           end)
-        {:ok, results}
+        
+        # Check if any operations failed
+        errors = Enum.filter(results, fn
+          {:error, _} -> true
+          _ -> false
+        end)
+        
+        if Enum.empty?(errors) do
+          {:ok, results}
+        else
+          # Return both successful results and errors
+          {:partial, results, errors}
+        end
+        
       {:error, error} ->
         {:error, error}
     end
@@ -151,10 +197,33 @@ defmodule Drowzee.K8s.SleepSchedule do
     case get_deployments(sleep_schedule) do
       {:ok, deployments} ->
         results = Enum.map(deployments, fn deployment ->
-          original = Deployment.get_original_replicas(deployment)
-          Deployment.scale_deployment(deployment, original)
+          try do
+            original = Deployment.get_original_replicas(deployment)
+            Deployment.scale_deployment(deployment, original)
+          rescue
+            e ->
+              Logger.error("Error scaling up deployment: #{inspect(e)}", name: deployment["metadata"]["name"])
+              {:error, "Failed to scale up deployment #{deployment["metadata"]["name"]}: #{inspect(e)}"}
+          catch
+            kind, reason ->
+              Logger.error("Error scaling up deployment: #{inspect(reason)}", name: deployment["metadata"]["name"])
+              {:error, "Failed to scale up deployment #{deployment["metadata"]["name"]}: #{inspect(reason)}"}
+          end
         end)
-        {:ok, results}
+        
+        # Check if any operations failed
+        errors = Enum.filter(results, fn
+          {:error, _} -> true
+          _ -> false
+        end)
+        
+        if Enum.empty?(errors) do
+          {:ok, results}
+        else
+          # Return both successful results and errors
+          {:partial, results, errors}
+        end
+        
       {:error, error} ->
         {:error, error}
     end
@@ -166,10 +235,33 @@ defmodule Drowzee.K8s.SleepSchedule do
       {:ok, statefulsets} ->
         results =
           Enum.map(statefulsets, fn statefulset ->
-            original = StatefulSet.get_original_replicas(statefulset)
-            StatefulSet.scale_statefulset(statefulset, original)
+            try do
+              original = StatefulSet.get_original_replicas(statefulset)
+              StatefulSet.scale_statefulset(statefulset, original)
+            rescue
+              e ->
+                Logger.error("Error scaling up statefulset: #{inspect(e)}", name: statefulset["metadata"]["name"])
+                {:error, "Failed to scale up statefulset #{statefulset["metadata"]["name"]}: #{inspect(e)}"}
+            catch
+              kind, reason ->
+                Logger.error("Error scaling up statefulset: #{inspect(reason)}", name: statefulset["metadata"]["name"])
+                {:error, "Failed to scale up statefulset #{statefulset["metadata"]["name"]}: #{inspect(reason)}"}
+            end
           end)
-        {:ok, results}
+        
+        # Check if any operations failed
+        errors = Enum.filter(results, fn
+          {:error, _} -> true
+          _ -> false
+        end)
+        
+        if Enum.empty?(errors) do
+          {:ok, results}
+        else
+          # Return both successful results and errors
+          {:partial, results, errors}
+        end
+        
       {:error, error} ->
         {:error, error}
     end

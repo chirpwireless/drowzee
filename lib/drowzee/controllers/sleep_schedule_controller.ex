@@ -249,21 +249,39 @@ defmodule Drowzee.Controller.SleepScheduleController do
       {operation, resource} ->
         # Execute the operation
         try do
-          apply_scaling_operation(operation, resource)
+          result = apply_scaling_operation(operation, resource)
+          
+          # Handle the result based on its type
+          case result do
+            {:ok, _results} ->
+              # Operation succeeded, continue normally
+              :ok
+              
+            {:partial, _results, _errors, updated_resource} ->
+              # Some operations failed but we continue
+              # Update the resource in the K8s API with the error condition
+              update_resource_status(updated_resource)
+              
+            {:error, _error, updated_resource} ->
+              # Operation failed completely but we continue
+              # Update the resource in the K8s API with the error condition
+              update_resource_status(updated_resource)
+          end
+          
           # Small delay to avoid overwhelming the Kubernetes API
           Process.sleep(200)
         rescue
           e ->
             Logger.error("Error executing scaling operation: #{inspect(operation)}, #{inspect(e)}")
         end
-        # Process the next item
+        # Process the next item regardless of success/failure
         do_process_queue()
     end
   end
   
   # Apply the actual scaling operation
   defp apply_scaling_operation(operation, resource) do
-    case operation do
+    result = case operation do
       :scale_down_statefulsets -> SleepSchedule.scale_down_statefulsets(resource)
       :scale_down_deployments -> SleepSchedule.scale_down_deployments(resource)
       :suspend_cronjobs -> SleepSchedule.suspend_cronjobs(resource)
@@ -271,6 +289,91 @@ defmodule Drowzee.Controller.SleepScheduleController do
       :scale_up_deployments -> SleepSchedule.scale_up_deployments(resource)
       :resume_cronjobs -> SleepSchedule.resume_cronjobs(resource)
     end
+    
+    # Handle different result types
+    case result do
+      {:ok, results} -> 
+        # All operations succeeded
+        {:ok, results}
+      
+      {:partial, results, errors} ->
+        # Some operations failed, but we continue processing
+        # Log the errors
+        Enum.each(errors, fn {:error, error_msg} ->
+          Logger.error("Scaling operation partially failed: #{error_msg}")
+        end)
+        
+        # Set error condition on the sleep schedule but continue processing
+        resource = set_error_condition(resource, "ScaleFailed", 
+          "Some resources failed to scale, but processing continued. Check logs for details.")
+        
+        # Return partial success to continue with other operations
+        {:partial, results, errors, resource}
+      
+      {:error, error} ->
+        # Complete failure, but we'll still continue with other operations
+        Logger.error("Scaling operation failed: #{inspect(error)}")
+        
+        # Set error condition on the sleep schedule
+        resource = set_error_condition(resource, "ScaleFailed", 
+          "Failed to scale resources: #{inspect(error)}")
+        
+        # Return error but with the updated resource to continue processing
+        {:error, error, resource}
+    end
+  end
+  
+  # Helper to set the error condition on a sleep schedule
+  defp set_error_condition(resource, reason, message) do
+    # Update the status with the error condition
+    conditions = resource["status"]["conditions"] || []
+    
+    # Find and update or create the Error condition
+    error_condition = Enum.find(conditions, %{"type" => "Error", "status" => "False"}, fn condition ->
+      condition["type"] == "Error"
+    end)
+    
+    updated_error_condition = error_condition
+    |> Map.put("status", "True")
+    |> Map.put("reason", reason)
+    |> Map.put("message", message)
+    |> Map.put("lastTransitionTime", DateTime.utc_now() |> DateTime.to_iso8601())
+    
+    # Replace or add the error condition
+    updated_conditions = if Enum.any?(conditions, fn c -> c["type"] == "Error" end) do
+      Enum.map(conditions, fn condition ->
+        if condition["type"] == "Error", do: updated_error_condition, else: condition
+      end)
+    else
+      [updated_error_condition | conditions]
+    end
+    
+    # Update the resource with the new conditions
+    put_in(resource, ["status", "conditions"], updated_conditions)
+  end
+  
+  # Update the resource status in the Kubernetes API
+  defp update_resource_status(resource) do
+    Logger.info("Updating resource status with error condition", 
+      name: resource["metadata"]["name"],
+      namespace: resource["metadata"]["namespace"])
+    
+    # Create a status subresource update operation
+    operation = K8s.Client.update_status(resource)
+    
+    # Execute the update
+    case K8s.Client.run(Drowzee.K8s.conn(), operation) do
+      {:ok, updated} ->
+        Logger.info("Successfully updated resource status")
+        {:ok, updated}
+      {:error, reason} ->
+        Logger.error("Failed to update resource status: #{inspect(reason)}")
+        {:error, reason}
+    end
+  rescue
+    e ->
+      Logger.error("Error updating resource status: #{inspect(e)}")
+      {:error, e}
   end
 
   # Prioritized scaling down: StatefulSets (1) -> Deployments (2) -> CronJobs (3)
