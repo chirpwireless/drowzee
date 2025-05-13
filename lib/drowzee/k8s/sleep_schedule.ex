@@ -80,52 +80,68 @@ defmodule Drowzee.K8s.SleepSchedule do
   @retry with: exponential_backoff(1000) |> Stream.take(2)
   def get_deployments(sleep_schedule) do
     namespace = namespace(sleep_schedule)
+    deployment_names = deployment_names(sleep_schedule) || []
 
     results =
-      (deployment_names(sleep_schedule) || [])
-      |> Stream.map(&Drowzee.K8s.get_deployment(&1, namespace))
+      deployment_names
+      |> Stream.map(fn name -> {name, Drowzee.K8s.get_deployment(name, namespace)} end)
       |> Enum.to_list()
 
-    case Enum.all?(results, fn
-           {:ok, _} -> true
-           _ -> false
-         end) do
-      true ->
-        {:ok, Enum.map(results, fn {:ok, deployment} -> deployment end)}
+    # Separate successful and failed results
+    {found, missing} =
+      Enum.split_with(results, fn {_, result} -> match?({:ok, _}, result) end)
 
-      false ->
-        {:error,
-         Enum.filter(results, fn
-           {:error, _} -> true
-           _ -> false
-         end)
-         |> Enum.map(fn {:error, error} -> error end)}
+    found_deployments = Enum.map(found, fn {_, {:ok, deployment}} -> deployment end)
+
+    missing_resources =
+      Enum.map(missing, fn {name, {:error, reason}} ->
+        %{
+          "kind" => "Deployment",
+          "name" => name,
+          "namespace" => namespace,
+          "error" => inspect(reason),
+          "status" => "NotFound"
+        }
+      end)
+
+    if Enum.empty?(missing_resources) do
+      {:ok, found_deployments}
+    else
+      {:partial, found_deployments, missing_resources}
     end
   end
 
   @retry with: exponential_backoff(1000) |> Stream.take(2)
   def get_statefulsets(sleep_schedule) do
     namespace = namespace(sleep_schedule)
+    statefulset_names = statefulset_names(sleep_schedule) || []
 
     results =
-      (statefulset_names(sleep_schedule) || [])
-      |> Stream.map(&Drowzee.K8s.get_statefulset(&1, namespace))
+      statefulset_names
+      |> Stream.map(fn name -> {name, Drowzee.K8s.get_statefulset(name, namespace)} end)
       |> Enum.to_list()
 
-    case Enum.all?(results, fn
-           {:ok, _} -> true
-           _ -> false
-         end) do
-      true ->
-        {:ok, Enum.map(results, fn {:ok, statefulset} -> statefulset end)}
+    # Separate successful and failed results
+    {found, missing} =
+      Enum.split_with(results, fn {_, result} -> match?({:ok, _}, result) end)
 
-      false ->
-        {:error,
-         Enum.filter(results, fn
-           {:error, _} -> true
-           _ -> false
-         end)
-         |> Enum.map(fn {:error, error} -> error end)}
+    found_statefulsets = Enum.map(found, fn {_, {:ok, statefulset}} -> statefulset end)
+
+    missing_resources =
+      Enum.map(missing, fn {name, {:error, reason}} ->
+        %{
+          "kind" => "StatefulSet",
+          "name" => name,
+          "namespace" => namespace,
+          "error" => inspect(reason),
+          "status" => "NotFound"
+        }
+      end)
+
+    if Enum.empty?(missing_resources) do
+      {:ok, found_statefulsets}
+    else
+      {:partial, found_statefulsets, missing_resources}
     end
   end
 
@@ -160,97 +176,124 @@ defmodule Drowzee.K8s.SleepSchedule do
 
     case get_deployments(sleep_schedule) do
       {:ok, deployments} ->
-        results =
-          Enum.map(deployments, fn deployment ->
-            try do
-              deployment = Deployment.save_original_replicas(deployment)
+        # All deployments found, proceed normally
+        scale_found_deployments(deployments)
 
-              case Deployment.scale_deployment(deployment, 0) do
-                {:ok, scaled_deployment} ->
-                  {:ok, scaled_deployment}
+      {:partial, found_deployments, missing_resources} ->
+        # Some deployments were not found
+        Logger.warning("Some deployments were not found: #{inspect(missing_resources)}")
 
-                {:error, reason} ->
-                  name = deployment["metadata"]["name"]
-                  Logger.error("Error scaling down deployment: #{inspect(reason)}", name: name)
-                  # Mark this specific resource as failed
-                  failed_deployment =
-                    put_in(
-                      deployment,
-                      ["metadata", "annotations", "drowzee.io/scale-failed"],
-                      "true"
-                    )
+        # Scale the deployments that were found
+        scaling_result = scale_found_deployments(found_deployments)
 
-                  failed_deployment =
-                    put_in(
-                      failed_deployment,
-                      ["metadata", "annotations", "drowzee.io/scale-error"],
-                      "Failed to scale: #{inspect(reason)}"
-                    )
+        # Create a combined result that includes both scaling results and missing resources
+        case scaling_result do
+          {:ok, results} ->
+            # All found deployments scaled successfully, but we still have missing ones
+            {:partial, results, missing_resources}
 
-                  {:error, failed_deployment,
-                   "Failed to scale down deployment #{name}: #{inspect(reason)}"}
-              end
-            rescue
-              e ->
-                name = deployment["metadata"]["name"]
-                Logger.error("Error scaling down deployment: #{inspect(e)}", name: name)
-                # Mark this specific resource as failed
-                failed_deployment =
-                  put_in(
-                    deployment,
-                    ["metadata", "annotations", "drowzee.io/scale-failed"],
-                    "true"
-                  )
+          {:partial, results, errors} ->
+            # Some found deployments failed to scale and we have missing ones
+            {:partial, results, errors ++ missing_resources}
 
-                failed_deployment =
-                  put_in(
-                    failed_deployment,
-                    ["metadata", "annotations", "drowzee.io/scale-error"],
-                    "Exception: #{inspect(e)}"
-                  )
-
-                {:error, failed_deployment,
-                 "Failed to scale down deployment #{name}: #{inspect(e)}"}
-            catch
-              kind, reason ->
-                name = deployment["metadata"]["name"]
-                Logger.error("Error scaling down deployment: #{inspect(reason)}", name: name)
-                # Mark this specific resource as failed
-                failed_deployment =
-                  put_in(
-                    deployment,
-                    ["metadata", "annotations", "drowzee.io/scale-failed"],
-                    "true"
-                  )
-
-                failed_deployment =
-                  put_in(
-                    failed_deployment,
-                    ["metadata", "annotations", "drowzee.io/scale-error"],
-                    "Caught #{kind}: #{inspect(reason)}"
-                  )
-
-                {:error, failed_deployment,
-                 "Failed to scale down deployment #{name}: #{inspect(reason)}"}
-            end
-          end)
-
-        # Check if any operations failed
-        errors =
-          Enum.filter(results, fn
-            {:error, _} -> true
-            _ -> false
-          end)
-
-        if Enum.empty?(errors) do
-          {:ok, results}
-        else
-          # Return both successful results and errors
-          {:partial, results, errors}
+          {:error, error} ->
+            # Complete failure scaling found deployments
+            {:error, error}
         end
 
       {:error, error} ->
         {:error, error}
+    end
+  end
+
+  # Helper function to scale deployments that were found
+  defp scale_found_deployments(deployments) do
+    results =
+      Enum.map(deployments, fn deployment ->
+        try do
+          deployment = Deployment.save_original_replicas(deployment)
+
+          case Deployment.scale_deployment(deployment, 0) do
+            {:ok, scaled_deployment} ->
+              {:ok, scaled_deployment}
+
+            {:error, reason} ->
+              name = deployment["metadata"]["name"]
+              Logger.error("Error scaling down deployment: #{inspect(reason)}", name: name)
+              # Mark this specific resource as failed
+              failed_deployment =
+                put_in(
+                  deployment,
+                  ["metadata", "annotations", "drowzee.io/scale-failed"],
+                  "true"
+                )
+
+              failed_deployment =
+                put_in(
+                  failed_deployment,
+                  ["metadata", "annotations", "drowzee.io/scale-error"],
+                  "Failed to scale: #{inspect(reason)}"
+                )
+
+              {:error, failed_deployment,
+               "Failed to scale down deployment #{name}: #{inspect(reason)}"}
+          end
+        rescue
+          e ->
+            name = deployment["metadata"]["name"]
+            Logger.error("Error scaling down deployment: #{inspect(e)}", name: name)
+            # Mark this specific resource as failed
+            failed_deployment =
+              put_in(
+                deployment,
+                ["metadata", "annotations", "drowzee.io/scale-failed"],
+                "true"
+              )
+
+            failed_deployment =
+              put_in(
+                failed_deployment,
+                ["metadata", "annotations", "drowzee.io/scale-error"],
+                "Exception: #{inspect(e)}"
+              )
+
+            {:error, failed_deployment, "Failed to scale down deployment #{name}: #{inspect(e)}"}
+        catch
+          kind, reason ->
+            name = deployment["metadata"]["name"]
+            Logger.error("Error scaling down deployment: #{inspect(reason)}", name: name)
+            # Mark this specific resource as failed
+            failed_deployment =
+              put_in(
+                deployment,
+                ["metadata", "annotations", "drowzee.io/scale-failed"],
+                "true"
+              )
+
+            failed_deployment =
+              put_in(
+                failed_deployment,
+                ["metadata", "annotations", "drowzee.io/scale-error"],
+                "Caught #{kind}: #{inspect(reason)}"
+              )
+
+            {:error, failed_deployment,
+             "Failed to scale down deployment #{name}: #{inspect(reason)}"}
+        end
+      end)
+
+    # Check if any operations failed
+    errors =
+      Enum.filter(results, fn
+        {:error, _, _} -> true
+        _ -> false
+      end)
+
+    if Enum.empty?(errors) do
+      {:ok, results}
+    else
+      # Return both successful results and errors
+      {:partial, results, errors}
     end
   end
 
@@ -259,97 +302,125 @@ defmodule Drowzee.K8s.SleepSchedule do
 
     case get_statefulsets(sleep_schedule) do
       {:ok, statefulsets} ->
-        results =
-          Enum.map(statefulsets, fn statefulset ->
-            try do
-              statefulset = StatefulSet.save_original_replicas(statefulset)
+        # All statefulsets found, proceed normally
+        scale_found_statefulsets(statefulsets)
 
-              case StatefulSet.scale_statefulset(statefulset, 0) do
-                {:ok, scaled_statefulset} ->
-                  {:ok, scaled_statefulset}
+      {:partial, found_statefulsets, missing_resources} ->
+        # Some statefulsets were not found
+        Logger.warning("Some statefulsets were not found: #{inspect(missing_resources)}")
 
-                {:error, reason} ->
-                  name = statefulset["metadata"]["name"]
-                  Logger.error("Error scaling down statefulset: #{inspect(reason)}", name: name)
-                  # Mark this specific resource as failed
-                  failed_statefulset =
-                    put_in(
-                      statefulset,
-                      ["metadata", "annotations", "drowzee.io/scale-failed"],
-                      "true"
-                    )
+        # Scale the statefulsets that were found
+        scaling_result = scale_found_statefulsets(found_statefulsets)
 
-                  failed_statefulset =
-                    put_in(
-                      failed_statefulset,
-                      ["metadata", "annotations", "drowzee.io/scale-error"],
-                      "Failed to scale: #{inspect(reason)}"
-                    )
+        # Create a combined result that includes both scaling results and missing resources
+        case scaling_result do
+          {:ok, results} ->
+            # All found statefulsets scaled successfully, but we still have missing ones
+            {:partial, results, missing_resources}
 
-                  {:error, failed_statefulset,
-                   "Failed to scale down statefulset #{name}: #{inspect(reason)}"}
-              end
-            rescue
-              e ->
-                name = statefulset["metadata"]["name"]
-                Logger.error("Error scaling down statefulset: #{inspect(e)}", name: name)
-                # Mark this specific resource as failed
-                failed_statefulset =
-                  put_in(
-                    statefulset,
-                    ["metadata", "annotations", "drowzee.io/scale-failed"],
-                    "true"
-                  )
+          {:partial, results, errors} ->
+            # Some found statefulsets failed to scale and we have missing ones
+            {:partial, results, errors ++ missing_resources}
 
-                failed_statefulset =
-                  put_in(
-                    failed_statefulset,
-                    ["metadata", "annotations", "drowzee.io/scale-error"],
-                    "Exception: #{inspect(e)}"
-                  )
-
-                {:error, failed_statefulset,
-                 "Failed to scale down statefulset #{name}: #{inspect(e)}"}
-            catch
-              kind, reason ->
-                name = statefulset["metadata"]["name"]
-                Logger.error("Error scaling down statefulset: #{inspect(reason)}", name: name)
-                # Mark this specific resource as failed
-                failed_statefulset =
-                  put_in(
-                    statefulset,
-                    ["metadata", "annotations", "drowzee.io/scale-failed"],
-                    "true"
-                  )
-
-                failed_statefulset =
-                  put_in(
-                    failed_statefulset,
-                    ["metadata", "annotations", "drowzee.io/scale-error"],
-                    "Caught #{kind}: #{inspect(reason)}"
-                  )
-
-                {:error, failed_statefulset,
-                 "Failed to scale down statefulset #{name}: #{inspect(reason)}"}
-            end
-          end)
-
-        # Check if any operations failed
-        errors =
-          Enum.filter(results, fn
-            {:error, _} -> true
-            _ -> false
-          end)
-
-        if Enum.empty?(errors) do
-          {:ok, results}
-        else
-          # Return both successful results and errors
-          {:partial, results, errors}
+          {:error, error} ->
+            # Complete failure scaling found statefulsets
+            {:error, error}
         end
 
       {:error, error} ->
         {:error, error}
+    end
+  end
+
+  # Helper function to scale statefulsets that were found
+  defp scale_found_statefulsets(statefulsets) do
+    results =
+      Enum.map(statefulsets, fn statefulset ->
+        try do
+          statefulset = StatefulSet.save_original_replicas(statefulset)
+
+          case StatefulSet.scale_statefulset(statefulset, 0) do
+            {:ok, scaled_statefulset} ->
+              {:ok, scaled_statefulset}
+
+            {:error, reason} ->
+              name = statefulset["metadata"]["name"]
+              Logger.error("Error scaling down statefulset: #{inspect(reason)}", name: name)
+              # Mark this specific resource as failed
+              failed_statefulset =
+                put_in(
+                  statefulset,
+                  ["metadata", "annotations", "drowzee.io/scale-failed"],
+                  "true"
+                )
+
+              failed_statefulset =
+                put_in(
+                  failed_statefulset,
+                  ["metadata", "annotations", "drowzee.io/scale-error"],
+                  "Failed to scale: #{inspect(reason)}"
+                )
+
+              {:error, failed_statefulset,
+               "Failed to scale down statefulset #{name}: #{inspect(reason)}"}
+          end
+        rescue
+          e ->
+            name = statefulset["metadata"]["name"]
+            Logger.error("Error scaling down statefulset: #{inspect(e)}", name: name)
+            # Mark this specific resource as failed
+            failed_statefulset =
+              put_in(
+                statefulset,
+                ["metadata", "annotations", "drowzee.io/scale-failed"],
+                "true"
+              )
+
+            failed_statefulset =
+              put_in(
+                failed_statefulset,
+                ["metadata", "annotations", "drowzee.io/scale-error"],
+                "Exception: #{inspect(e)}"
+              )
+
+            {:error, failed_statefulset,
+             "Failed to scale down statefulset #{name}: #{inspect(e)}"}
+        catch
+          kind, reason ->
+            name = statefulset["metadata"]["name"]
+            Logger.error("Error scaling down statefulset: #{inspect(reason)}", name: name)
+            # Mark this specific resource as failed
+            failed_statefulset =
+              put_in(
+                statefulset,
+                ["metadata", "annotations", "drowzee.io/scale-failed"],
+                "true"
+              )
+
+            failed_statefulset =
+              put_in(
+                failed_statefulset,
+                ["metadata", "annotations", "drowzee.io/scale-error"],
+                "Caught #{kind}: #{inspect(reason)}"
+              )
+
+            {:error, failed_statefulset,
+             "Failed to scale down statefulset #{name}: #{inspect(reason)}"}
+        end
+      end)
+
+    # Check if any operations failed
+    errors =
+      Enum.filter(results, fn
+        {:error, _, _} -> true
+        _ -> false
+      end)
+
+    if Enum.empty?(errors) do
+      {:ok, results}
+    else
+      # Return both successful results and errors
+      {:partial, results, errors}
     end
   end
 
@@ -371,114 +442,141 @@ defmodule Drowzee.K8s.SleepSchedule do
 
     case get_deployments(sleep_schedule) do
       {:ok, deployments} ->
-        results =
-          Enum.map(deployments, fn deployment ->
-            try do
-              original = Deployment.get_original_replicas(deployment)
+        # All deployments found, proceed normally
+        scale_up_found_deployments(deployments)
 
-              case Deployment.scale_deployment(deployment, original) do
-                {:ok, scaled_deployment} ->
-                  # Clear any previous failure annotations if they exist
-                  scaled_deployment =
-                    pop_in(scaled_deployment, [
-                      "metadata",
-                      "annotations",
-                      "drowzee.io/scale-failed"
-                    ])
-                    |> elem(1)
+      {:partial, found_deployments, missing_resources} ->
+        # Some deployments were not found
+        Logger.warning("Some deployments were not found: #{inspect(missing_resources)}")
 
-                  scaled_deployment =
-                    pop_in(scaled_deployment, [
-                      "metadata",
-                      "annotations",
-                      "drowzee.io/scale-error"
-                    ])
-                    |> elem(1)
+        # Scale the deployments that were found
+        scaling_result = scale_up_found_deployments(found_deployments)
 
-                  {:ok, scaled_deployment}
+        # Create a combined result that includes both scaling results and missing resources
+        case scaling_result do
+          {:ok, results} ->
+            # All found deployments scaled successfully, but we still have missing ones
+            {:partial, results, missing_resources}
 
-                {:error, reason} ->
-                  name = deployment["metadata"]["name"]
-                  Logger.error("Error scaling up deployment: #{inspect(reason)}", name: name)
-                  # Mark this specific resource as failed
-                  failed_deployment =
-                    put_in(
-                      deployment,
-                      ["metadata", "annotations", "drowzee.io/scale-failed"],
-                      "true"
-                    )
+          {:partial, results, errors} ->
+            # Some found deployments failed to scale and we have missing ones
+            {:partial, results, errors ++ missing_resources}
 
-                  failed_deployment =
-                    put_in(
-                      failed_deployment,
-                      ["metadata", "annotations", "drowzee.io/scale-error"],
-                      "Failed to scale: #{inspect(reason)}"
-                    )
-
-                  {:error, failed_deployment,
-                   "Failed to scale up deployment #{name}: #{inspect(reason)}"}
-              end
-            rescue
-              e ->
-                name = deployment["metadata"]["name"]
-                Logger.error("Error scaling up deployment: #{inspect(e)}", name: name)
-                # Mark this specific resource as failed
-                failed_deployment =
-                  put_in(
-                    deployment,
-                    ["metadata", "annotations", "drowzee.io/scale-failed"],
-                    "true"
-                  )
-
-                failed_deployment =
-                  put_in(
-                    failed_deployment,
-                    ["metadata", "annotations", "drowzee.io/scale-error"],
-                    "Exception: #{inspect(e)}"
-                  )
-
-                {:error, failed_deployment,
-                 "Failed to scale up deployment #{name}: #{inspect(e)}"}
-            catch
-              kind, reason ->
-                name = deployment["metadata"]["name"]
-                Logger.error("Error scaling up deployment: #{inspect(reason)}", name: name)
-                # Mark this specific resource as failed
-                failed_deployment =
-                  put_in(
-                    deployment,
-                    ["metadata", "annotations", "drowzee.io/scale-failed"],
-                    "true"
-                  )
-
-                failed_deployment =
-                  put_in(
-                    failed_deployment,
-                    ["metadata", "annotations", "drowzee.io/scale-error"],
-                    "Caught #{kind}: #{inspect(reason)}"
-                  )
-
-                {:error, failed_deployment,
-                 "Failed to scale up deployment #{name}: #{inspect(reason)}"}
-            end
-          end)
-
-        # Check if any operations failed
-        errors =
-          Enum.filter(results, fn
-            {:error, _} -> true
-            _ -> false
-          end)
-
-        if Enum.empty?(errors) do
-          {:ok, results}
-        else
-          # Return both successful results and errors
-          {:partial, results, errors}
+          {:error, error} ->
+            # Complete failure scaling found deployments
+            {:error, error}
         end
 
       {:error, error} ->
         {:error, error}
+    end
+  end
+
+  # Helper function to scale up deployments that were found
+  defp scale_up_found_deployments(deployments) do
+    results =
+      Enum.map(deployments, fn deployment ->
+        try do
+          original = Deployment.get_original_replicas(deployment)
+
+          case Deployment.scale_deployment(deployment, original) do
+            {:ok, scaled_deployment} ->
+              # Clear any previous failure annotations if they exist
+              scaled_deployment =
+                pop_in(scaled_deployment, [
+                  "metadata",
+                  "annotations",
+                  "drowzee.io/scale-failed"
+                ])
+                |> elem(1)
+
+              scaled_deployment =
+                pop_in(scaled_deployment, [
+                  "metadata",
+                  "annotations",
+                  "drowzee.io/scale-error"
+                ])
+                |> elem(1)
+
+              {:ok, scaled_deployment}
+
+            {:error, reason} ->
+              name = deployment["metadata"]["name"]
+              Logger.error("Error scaling up deployment: #{inspect(reason)}", name: name)
+              # Mark this specific resource as failed
+              failed_deployment =
+                put_in(
+                  deployment,
+                  ["metadata", "annotations", "drowzee.io/scale-failed"],
+                  "true"
+                )
+
+              failed_deployment =
+                put_in(
+                  failed_deployment,
+                  ["metadata", "annotations", "drowzee.io/scale-error"],
+                  "Failed to scale: #{inspect(reason)}"
+                )
+
+              {:error, failed_deployment,
+               "Failed to scale up deployment #{name}: #{inspect(reason)}"}
+          end
+        rescue
+          e ->
+            name = deployment["metadata"]["name"]
+            Logger.error("Error scaling up deployment: #{inspect(e)}", name: name)
+            # Mark this specific resource as failed
+            failed_deployment =
+              put_in(
+                deployment,
+                ["metadata", "annotations", "drowzee.io/scale-failed"],
+                "true"
+              )
+
+            failed_deployment =
+              put_in(
+                failed_deployment,
+                ["metadata", "annotations", "drowzee.io/scale-error"],
+                "Exception: #{inspect(e)}"
+              )
+
+            {:error, failed_deployment, "Failed to scale up deployment #{name}: #{inspect(e)}"}
+        catch
+          kind, reason ->
+            name = deployment["metadata"]["name"]
+            Logger.error("Error scaling up deployment: #{inspect(reason)}", name: name)
+            # Mark this specific resource as failed
+            failed_deployment =
+              put_in(
+                deployment,
+                ["metadata", "annotations", "drowzee.io/scale-failed"],
+                "true"
+              )
+
+            failed_deployment =
+              put_in(
+                failed_deployment,
+                ["metadata", "annotations", "drowzee.io/scale-error"],
+                "Caught #{kind}: #{inspect(reason)}"
+              )
+
+            {:error, failed_deployment,
+             "Failed to scale up deployment #{name}: #{inspect(reason)}"}
+        end
+      end)
+
+    # Check if any operations failed
+    errors =
+      Enum.filter(results, fn
+        {:error, _, _} -> true
+        _ -> false
+      end)
+
+    if Enum.empty?(errors) do
+      {:ok, results}
+    else
+      # Return both successful results and errors
+      {:partial, results, errors}
     end
   end
 
@@ -487,114 +585,141 @@ defmodule Drowzee.K8s.SleepSchedule do
 
     case get_statefulsets(sleep_schedule) do
       {:ok, statefulsets} ->
-        results =
-          Enum.map(statefulsets, fn statefulset ->
-            try do
-              original = StatefulSet.get_original_replicas(statefulset)
+        # All statefulsets found, proceed normally
+        scale_up_found_statefulsets(statefulsets)
 
-              case StatefulSet.scale_statefulset(statefulset, original) do
-                {:ok, scaled_statefulset} ->
-                  # Clear any previous failure annotations if they exist
-                  scaled_statefulset =
-                    pop_in(scaled_statefulset, [
-                      "metadata",
-                      "annotations",
-                      "drowzee.io/scale-failed"
-                    ])
-                    |> elem(1)
+      {:partial, found_statefulsets, missing_resources} ->
+        # Some statefulsets were not found
+        Logger.warning("Some statefulsets were not found: #{inspect(missing_resources)}")
 
-                  scaled_statefulset =
-                    pop_in(scaled_statefulset, [
-                      "metadata",
-                      "annotations",
-                      "drowzee.io/scale-error"
-                    ])
-                    |> elem(1)
+        # Scale the statefulsets that were found
+        scaling_result = scale_up_found_statefulsets(found_statefulsets)
 
-                  {:ok, scaled_statefulset}
+        # Create a combined result that includes both scaling results and missing resources
+        case scaling_result do
+          {:ok, results} ->
+            # All found statefulsets scaled successfully, but we still have missing ones
+            {:partial, results, missing_resources}
 
-                {:error, reason} ->
-                  name = statefulset["metadata"]["name"]
-                  Logger.error("Error scaling up statefulset: #{inspect(reason)}", name: name)
-                  # Mark this specific resource as failed
-                  failed_statefulset =
-                    put_in(
-                      statefulset,
-                      ["metadata", "annotations", "drowzee.io/scale-failed"],
-                      "true"
-                    )
+          {:partial, results, errors} ->
+            # Some found statefulsets failed to scale and we have missing ones
+            {:partial, results, errors ++ missing_resources}
 
-                  failed_statefulset =
-                    put_in(
-                      failed_statefulset,
-                      ["metadata", "annotations", "drowzee.io/scale-error"],
-                      "Failed to scale: #{inspect(reason)}"
-                    )
-
-                  {:error, failed_statefulset,
-                   "Failed to scale up statefulset #{name}: #{inspect(reason)}"}
-              end
-            rescue
-              e ->
-                name = statefulset["metadata"]["name"]
-                Logger.error("Error scaling up statefulset: #{inspect(e)}", name: name)
-                # Mark this specific resource as failed
-                failed_statefulset =
-                  put_in(
-                    statefulset,
-                    ["metadata", "annotations", "drowzee.io/scale-failed"],
-                    "true"
-                  )
-
-                failed_statefulset =
-                  put_in(
-                    failed_statefulset,
-                    ["metadata", "annotations", "drowzee.io/scale-error"],
-                    "Exception: #{inspect(e)}"
-                  )
-
-                {:error, failed_statefulset,
-                 "Failed to scale up statefulset #{name}: #{inspect(e)}"}
-            catch
-              kind, reason ->
-                name = statefulset["metadata"]["name"]
-                Logger.error("Error scaling up statefulset: #{inspect(reason)}", name: name)
-                # Mark this specific resource as failed
-                failed_statefulset =
-                  put_in(
-                    statefulset,
-                    ["metadata", "annotations", "drowzee.io/scale-failed"],
-                    "true"
-                  )
-
-                failed_statefulset =
-                  put_in(
-                    failed_statefulset,
-                    ["metadata", "annotations", "drowzee.io/scale-error"],
-                    "Caught #{kind}: #{inspect(reason)}"
-                  )
-
-                {:error, failed_statefulset,
-                 "Failed to scale up statefulset #{name}: #{inspect(reason)}"}
-            end
-          end)
-
-        # Check if any operations failed
-        errors =
-          Enum.filter(results, fn
-            {:error, _} -> true
-            _ -> false
-          end)
-
-        if Enum.empty?(errors) do
-          {:ok, results}
-        else
-          # Return both successful results and errors
-          {:partial, results, errors}
+          {:error, error} ->
+            # Complete failure scaling found statefulsets
+            {:error, error}
         end
 
       {:error, error} ->
         {:error, error}
+    end
+  end
+
+  # Helper function to scale up statefulsets that were found
+  defp scale_up_found_statefulsets(statefulsets) do
+    results =
+      Enum.map(statefulsets, fn statefulset ->
+        try do
+          original = StatefulSet.get_original_replicas(statefulset)
+
+          case StatefulSet.scale_statefulset(statefulset, original) do
+            {:ok, scaled_statefulset} ->
+              # Clear any previous failure annotations if they exist
+              scaled_statefulset =
+                pop_in(scaled_statefulset, [
+                  "metadata",
+                  "annotations",
+                  "drowzee.io/scale-failed"
+                ])
+                |> elem(1)
+
+              scaled_statefulset =
+                pop_in(scaled_statefulset, [
+                  "metadata",
+                  "annotations",
+                  "drowzee.io/scale-error"
+                ])
+                |> elem(1)
+
+              {:ok, scaled_statefulset}
+
+            {:error, reason} ->
+              name = statefulset["metadata"]["name"]
+              Logger.error("Error scaling up statefulset: #{inspect(reason)}", name: name)
+              # Mark this specific resource as failed
+              failed_statefulset =
+                put_in(
+                  statefulset,
+                  ["metadata", "annotations", "drowzee.io/scale-failed"],
+                  "true"
+                )
+
+              failed_statefulset =
+                put_in(
+                  failed_statefulset,
+                  ["metadata", "annotations", "drowzee.io/scale-error"],
+                  "Failed to scale: #{inspect(reason)}"
+                )
+
+              {:error, failed_statefulset,
+               "Failed to scale up statefulset #{name}: #{inspect(reason)}"}
+          end
+        rescue
+          e ->
+            name = statefulset["metadata"]["name"]
+            Logger.error("Error scaling up statefulset: #{inspect(e)}", name: name)
+            # Mark this specific resource as failed
+            failed_statefulset =
+              put_in(
+                statefulset,
+                ["metadata", "annotations", "drowzee.io/scale-failed"],
+                "true"
+              )
+
+            failed_statefulset =
+              put_in(
+                failed_statefulset,
+                ["metadata", "annotations", "drowzee.io/scale-error"],
+                "Exception: #{inspect(e)}"
+              )
+
+            {:error, failed_statefulset, "Failed to scale up statefulset #{name}: #{inspect(e)}"}
+        catch
+          kind, reason ->
+            name = statefulset["metadata"]["name"]
+            Logger.error("Error scaling up statefulset: #{inspect(reason)}", name: name)
+            # Mark this specific resource as failed
+            failed_statefulset =
+              put_in(
+                statefulset,
+                ["metadata", "annotations", "drowzee.io/scale-failed"],
+                "true"
+              )
+
+            failed_statefulset =
+              put_in(
+                failed_statefulset,
+                ["metadata", "annotations", "drowzee.io/scale-error"],
+                "Caught #{kind}: #{inspect(reason)}"
+              )
+
+            {:error, failed_statefulset,
+             "Failed to scale up statefulset #{name}: #{inspect(reason)}"}
+        end
+      end)
+
+    # Check if any operations failed
+    errors =
+      Enum.filter(results, fn
+        {:error, _, _} -> true
+        _ -> false
+      end)
+
+    if Enum.empty?(errors) do
+      {:ok, results}
+    else
+      # Return both successful results and errors
+      {:partial, results, errors}
     end
   end
 

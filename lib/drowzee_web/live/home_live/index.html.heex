@@ -531,13 +531,17 @@
                       <% d = @deployments_by_name[deployment["name"]] %>
                       <%= if @name do %>
                         <%= cond do %>
+                          <% !d -> %>
+                            <span title="Resource not found in Kubernetes" class="text-red-500">
+                              ❓
+                            </span>
                           <% d && d["metadata"]["annotations"] && d["metadata"]["annotations"]["drowzee.io/scale-failed"] == "true" -> %>
                             <span
                               title={
                                 d["metadata"]["annotations"]["drowzee.io/scale-error"] ||
                                   "Failed to scale"
                               }
-                              class="text-red-500"
+                              class="text-amber-500"
                             >
                               ⚠️
                             </span>
@@ -585,13 +589,17 @@
                       <% s = @statefulsets_by_name[statefulset["name"]] %>
                       <%= if @name do %>
                         <%= cond do %>
+                          <% !s -> %>
+                            <span title="Resource not found in Kubernetes" class="text-red-500">
+                              ❓
+                            </span>
                           <% s && s["metadata"]["annotations"] && s["metadata"]["annotations"]["drowzee.io/scale-failed"] == "true" -> %>
                             <span
                               title={
                                 s["metadata"]["annotations"]["drowzee.io/scale-error"] ||
                                   "Failed to scale"
                               }
-                              class="text-red-500"
+                              class="text-amber-500"
                             >
                               ⚠️
                             </span>
