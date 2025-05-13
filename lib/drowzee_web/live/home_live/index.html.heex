@@ -663,13 +663,14 @@
                       <span class="ml-1">
                         <%= if c do %>
                           {c["metadata"]["name"]}
-                          <%= if c["metadata"]["name"] != cronjob["name"] do %>
-                            <span class="text-xs text-gray-500" title="Original wildcard pattern">
-                              (from {cronjob["name"]})
-                            </span>
-                          <% end %>
                         <% else %>
-                          {cronjob["name"]}
+                          <% # Try to use resolved name from annotation if available %>
+                          <% resolved_name = @resolved_wildcard_names[cronjob["name"]] %>
+                          <%= if resolved_name do %>
+                            {resolved_name}
+                          <% else %>
+                            {cronjob["name"]}
+                          <% end %>
                         <% end %>
                       </span>
 

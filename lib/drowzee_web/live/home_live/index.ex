@@ -286,15 +286,16 @@ defmodule DrowzeeWeb.HomeLive.Index do
   defp load_sleep_schedules(socket) do
     # Fetch sleep schedules based on the current view
     {sleep_schedules, deployments_by_name, statefulsets_by_name, cronjobs_by_name,
-     missing_resources} =
+     missing_resources,
+     resolved_wildcard_names} =
       case {socket.assigns.namespace, socket.assigns.name} do
         # Main page: fetch all sleep schedules
         {nil, nil} ->
-          {Drowzee.K8s.sleep_schedules(:all), %{}, %{}, %{}, []}
+          {Drowzee.K8s.sleep_schedules(:all), %{}, %{}, %{}, [], %{}}
 
         # Namespace page: fetch schedules for the namespace
         {namespace, nil} ->
-          {Drowzee.K8s.sleep_schedules(namespace), %{}, %{}, %{}, []}
+          {Drowzee.K8s.sleep_schedules(namespace), %{}, %{}, %{}, [], %{}}
 
         # Schedule page: fetch a specific schedule and its resources
         {namespace, name} ->
@@ -339,8 +340,29 @@ defmodule DrowzeeWeb.HomeLive.Index do
           # Create a map of CronJob names to CronJobs
           cjs_by_name = Map.new(cronjobs, &{&1["metadata"]["name"], &1})
 
+          # Extract resolved wildcard names from schedules
+          resolved_wildcard_names =
+            case schedules do
+              [schedule] ->
+                annotations = get_in(schedule, ["metadata", "annotations"]) || %{}
+                resolved_names_json = Map.get(annotations, "drowzee.io/resolved-wildcard-names")
+
+                if resolved_names_json do
+                  case Jason.decode(resolved_names_json) do
+                    {:ok, resolved_names} -> resolved_names
+                    _ -> %{}
+                  end
+                else
+                  %{}
+                end
+
+              _ ->
+                %{}
+            end
+
           # Return the schedules and resource maps
-          {schedules, deps_by_name, sts_by_name, cjs_by_name, missing_resources}
+          {schedules, deps_by_name, sts_by_name, cjs_by_name, missing_resources,
+           resolved_wildcard_names}
       end
 
     # Handle namespace statuses based on the current view
@@ -378,6 +400,7 @@ defmodule DrowzeeWeb.HomeLive.Index do
     |> assign(:statefulsets_by_name, statefulsets_by_name)
     |> assign(:cronjobs_by_name, cronjobs_by_name)
     |> assign(:missing_resources, missing_resources)
+    |> assign(:resolved_wildcard_names, resolved_wildcard_names)
     |> assign(:loading, false)
     |> filter_sleep_schedules(socket.assigns.search)
   end
