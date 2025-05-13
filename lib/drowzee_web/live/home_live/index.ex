@@ -306,40 +306,30 @@ defmodule DrowzeeWeb.HomeLive.Index do
             end
 
           # Only fetch resources if we have a specific schedule
-          {deployments, statefulsets, cronjobs, wildcard_map, missing_resources} =
+          {deployments, statefulsets, cronjobs, missing_resources} =
             case schedules do
               [schedule] ->
                 try do
                   # Get missing resources
                   missing = get_missing_resources(schedule)
 
-                  # Get cronjobs with wildcard mapping
-                  {cjs, wmap} =
-                    case Drowzee.K8s.get_cronjobs_for_schedule(schedule) do
-                      {cronjobs, wildcard_map} when is_list(cronjobs) and is_map(wildcard_map) ->
-                        {cronjobs, wildcard_map}
-
-                      cronjobs when is_list(cronjobs) ->
-                        # Handle old format for backward compatibility
-                        {cronjobs, %{}}
-                    end
-
-                  # Get deployments and statefulsets
+                  # Get deployments, statefulsets and cronjobs
                   deps = Drowzee.K8s.get_deployments_for_schedule(schedule)
                   sts = Drowzee.K8s.get_statefulsets_for_schedule(schedule)
+                  cjs = Drowzee.K8s.get_cronjobs_for_schedule(schedule)
 
                   # Return all resources
-                  {deps, sts, cjs, wmap, missing}
+                  {deps, sts, cjs, missing}
                 rescue
                   e ->
                     # Log the error and continue with empty values
                     Logger.error("Error fetching resources for sleep schedule: #{inspect(e)}")
-                    {[], [], [], %{}, []}
+                    {[], [], [], []}
                 end
 
               _ ->
                 # No schedules found
-                {[], [], [], %{}, []}
+                {[], [], [], []}
             end
 
           # Create maps for each resource type
@@ -348,10 +338,6 @@ defmodule DrowzeeWeb.HomeLive.Index do
 
           # Create a map of CronJob names to CronJobs
           cjs_by_name = Map.new(cronjobs, &{&1["metadata"]["name"], &1})
-
-          # Merge with wildcard mappings to include both original wildcard patterns and resolved CronJobs
-          # This ensures that wildcard patterns in the sleep schedule spec will map to their resolved CronJobs
-          cjs_by_name = Map.merge(cjs_by_name, wildcard_map)
 
           # Return the schedules and resource maps
           {schedules, deps_by_name, sts_by_name, cjs_by_name, missing_resources}

@@ -660,7 +660,18 @@
                             💤
                         <% end %>
                       <% end %>
-                      <span class="ml-1">{cronjob["name"]}</span>
+                      <span class="ml-1">
+                        <%= if c do %>
+                          {c["metadata"]["name"]}
+                          <%= if c["metadata"]["name"] != cronjob["name"] do %>
+                            <span class="text-xs text-gray-500" title="Original wildcard pattern">
+                              (from {cronjob["name"]})
+                            </span>
+                          <% end %>
+                        <% else %>
+                          {cronjob["name"]}
+                        <% end %>
+                      </span>
 
                       <% # Show error icon for suspend errors %>
                       <%= if c && c["metadata"]["annotations"] && c["metadata"]["annotations"]["drowzee.io/suspend-failed"] == "true" do %>
