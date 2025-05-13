@@ -188,7 +188,12 @@ defmodule Drowzee.K8s.SleepSchedule do
     {found, missing} =
       Enum.split_with(results, fn {_, result} -> match?({:ok, _}, result) end)
 
-    found_cronjobs = Enum.map(found, fn {_, {:ok, cronjob}} -> cronjob end)
+    found_cronjobs = Enum.map(found, fn {_, result} -> 
+      case result do
+        {:ok, cronjob} -> cronjob
+        {:ok, cronjob, _resolved_name} -> cronjob
+      end
+    end)
 
     missing_resources =
       Enum.map(missing, fn {name, {:error, reason}} ->
