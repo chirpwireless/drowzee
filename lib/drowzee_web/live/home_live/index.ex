@@ -284,20 +284,23 @@ defmodule DrowzeeWeb.HomeLive.Index do
   end
 
   defp load_sleep_schedules(socket) do
-    # Get all sleep schedules for the current namespace or specific schedule
+    # Fetch sleep schedules based on the current view
     {sleep_schedules, deployments_by_name, statefulsets_by_name, cronjobs_by_name,
      missing_resources} =
-      case socket.assigns.name do
-        nil ->
-          # When no specific name is provided, get all schedules for the namespace
-          schedules = Drowzee.K8s.sleep_schedules(socket.assigns.namespace)
-          {schedules, %{}, %{}, %{}, []}
+      case {socket.assigns.namespace, socket.assigns.name} do
+        # Main page: fetch all sleep schedules
+        {nil, nil} ->
+          {Drowzee.K8s.sleep_schedules(:all), %{}, %{}, %{}, []}
 
-        name ->
-          # When a specific name is provided, fetch only that schedule directly
-          # This is much more efficient than fetching all schedules and filtering
+        # Namespace page: fetch schedules for the namespace
+        {namespace, nil} ->
+          {Drowzee.K8s.sleep_schedules(namespace), %{}, %{}, %{}, []}
+
+        # Schedule page: fetch a specific schedule and its resources
+        {namespace, name} ->
+          # Fetch the specific schedule
           schedules =
-            case Drowzee.K8s.get_sleep_schedule(name, socket.assigns.namespace) do
+            case Drowzee.K8s.get_sleep_schedule(name, namespace) do
               {:ok, schedule} -> [schedule]
               {:error, _} -> []
             end

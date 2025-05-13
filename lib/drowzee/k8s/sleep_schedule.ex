@@ -27,11 +27,38 @@ defmodule Drowzee.K8s.SleepSchedule do
     |> Enum.map(& &1["name"])
   end
 
+  # Helper function to check if a name contains a wildcard (suffix only)
+  def is_wildcard_name?(name) do
+    String.ends_with?(name, "*")
+  end
+
+  # Helper function to get the prefix from a wildcard name
+  def get_wildcard_prefix(name) do
+    String.replace_suffix(name, "*", "")
+  end
+
+  # Ensure that the sleep schedule has an annotations field
+  def ensure_annotations(sleep_schedule) do
+    metadata = sleep_schedule["metadata"] || %{}
+    annotations = metadata["annotations"] || %{}
+
+    sleep_schedule
+    |> put_in(["metadata"], metadata)
+    |> put_in(["metadata", "annotations"], annotations)
+  end
+
   def cronjob_names(sleep_schedule) do
     Logger.debug("CronJobs entries: #{inspect(sleep_schedule["spec"]["cronjobs"])}")
 
     (sleep_schedule["spec"]["cronjobs"] || [])
-    |> Enum.map(& &1["name"])
+    |> Enum.map(fn entry ->
+      name = entry["name"]
+
+      %{
+        "name" => name,
+        "is_wildcard" => is_wildcard_name?(name)
+      }
+    end)
   end
 
   def ingress_name(sleep_schedule) do
@@ -148,26 +175,38 @@ defmodule Drowzee.K8s.SleepSchedule do
   @retry with: exponential_backoff(1000) |> Stream.take(2)
   def get_cronjobs(sleep_schedule) do
     namespace = namespace(sleep_schedule)
+    cronjob_name_infos = cronjob_names(sleep_schedule) || []
 
     results =
-      (cronjob_names(sleep_schedule) || [])
-      |> Stream.map(&Drowzee.K8s.get_cronjob(&1, namespace))
+      cronjob_name_infos
+      |> Stream.map(fn name_info ->
+        {name_info["name"], Drowzee.K8s.get_cronjob_with_wildcard(name_info, namespace)}
+      end)
       |> Enum.to_list()
 
-    case Enum.all?(results, fn
-           {:ok, _} -> true
-           _ -> false
-         end) do
-      true ->
-        {:ok, Enum.map(results, fn {:ok, cronjob} -> cronjob end)}
+    # Separate successful and failed results
+    {found, missing} =
+      Enum.split_with(results, fn {_, result} -> match?({:ok, _}, result) end)
 
-      false ->
-        {:error,
-         Enum.filter(results, fn
-           {:error, _} -> true
-           _ -> false
-         end)
-         |> Enum.map(fn {:error, error} -> error end)}
+    found_cronjobs = Enum.map(found, fn {_, {:ok, cronjob}} -> cronjob end)
+
+    missing_resources =
+      Enum.map(missing, fn {name, {:error, reason}} ->
+        %{
+          "kind" => "CronJob",
+          "name" => name,
+          "namespace" => namespace,
+          "error" => inspect(reason),
+          "reason" => reason.reason,
+          "message" => reason.message,
+          "status" => "NotFound"
+        }
+      end)
+
+    if Enum.empty?(missing_resources) do
+      {:ok, found_cronjobs}
+    else
+      {:partial, found_cronjobs, missing_resources}
     end
   end
 
@@ -429,8 +468,55 @@ defmodule Drowzee.K8s.SleepSchedule do
 
     case get_cronjobs(sleep_schedule) do
       {:ok, cronjobs} ->
-        results = Enum.map(cronjobs, &CronJob.suspend_cronjob(&1, true))
-        {:ok, results}
+        # Process each cronjob and collect results
+        scaling_result =
+          Enum.reduce_while(cronjobs, {[], []}, fn cronjob, {successes, failures} ->
+            case CronJob.suspend_cronjob(cronjob, true) do
+              {:ok, suspended_cronjob} ->
+                {:cont, {[suspended_cronjob | successes], failures}}
+
+              {:error, failed_cronjob, error_msg} ->
+                # Save the failed cronjob and continue with others
+                {:cont, {successes, [{:error, failed_cronjob, error_msg} | failures]}}
+            end
+          end)
+
+        case scaling_result do
+          {successes, []} ->
+            # All operations succeeded
+            {:ok, successes}
+
+          {successes, failures} ->
+            # Some operations failed
+            {:partial, successes, failures}
+        end
+
+      {:partial, found_cronjobs, missing_resources} ->
+        # Some cronjobs were not found
+        Logger.warning("Some cronjobs were not found: #{inspect(missing_resources)}")
+
+        # Suspend the cronjobs that were found
+        scaling_result =
+          Enum.reduce_while(found_cronjobs, {[], []}, fn cronjob, {successes, failures} ->
+            case CronJob.suspend_cronjob(cronjob, true) do
+              {:ok, suspended_cronjob} ->
+                {:cont, {[suspended_cronjob | successes], failures}}
+
+              {:error, failed_cronjob, error_msg} ->
+                # Save the failed cronjob and continue with others
+                {:cont, {successes, [{:error, failed_cronjob, error_msg} | failures]}}
+            end
+          end)
+
+        case scaling_result do
+          {successes, []} ->
+            # All found cronjobs were suspended successfully
+            {:partial, successes, missing_resources}
+
+          {successes, failures} ->
+            # Some found cronjobs failed to suspend
+            {:partial, successes, missing_resources ++ failures}
+        end
 
       {:error, error} ->
         {:error, error}
@@ -728,8 +814,55 @@ defmodule Drowzee.K8s.SleepSchedule do
 
     case get_cronjobs(sleep_schedule) do
       {:ok, cronjobs} ->
-        results = Enum.map(cronjobs, &CronJob.suspend_cronjob(&1, false))
-        {:ok, results}
+        # Process each cronjob and collect results
+        scaling_result =
+          Enum.reduce_while(cronjobs, {[], []}, fn cronjob, {successes, failures} ->
+            case CronJob.suspend_cronjob(cronjob, false) do
+              {:ok, resumed_cronjob} ->
+                {:cont, {[resumed_cronjob | successes], failures}}
+
+              {:error, failed_cronjob, error_msg} ->
+                # Save the failed cronjob and continue with others
+                {:cont, {successes, [{:error, failed_cronjob, error_msg} | failures]}}
+            end
+          end)
+
+        case scaling_result do
+          {successes, []} ->
+            # All operations succeeded
+            {:ok, successes}
+
+          {successes, failures} ->
+            # Some operations failed
+            {:partial, successes, failures}
+        end
+
+      {:partial, found_cronjobs, missing_resources} ->
+        # Some cronjobs were not found
+        Logger.warning("Some cronjobs were not found: #{inspect(missing_resources)}")
+
+        # Resume the cronjobs that were found
+        scaling_result =
+          Enum.reduce_while(found_cronjobs, {[], []}, fn cronjob, {successes, failures} ->
+            case CronJob.suspend_cronjob(cronjob, false) do
+              {:ok, resumed_cronjob} ->
+                {:cont, {[resumed_cronjob | successes], failures}}
+
+              {:error, failed_cronjob, error_msg} ->
+                # Save the failed cronjob and continue with others
+                {:cont, {successes, [{:error, failed_cronjob, error_msg} | failures]}}
+            end
+          end)
+
+        case scaling_result do
+          {successes, []} ->
+            # All found cronjobs were resumed successfully
+            {:partial, successes, missing_resources}
+
+          {successes, failures} ->
+            # Some found cronjobs failed to resume
+            {:partial, successes, missing_resources ++ failures}
+        end
 
       {:error, error} ->
         {:error, error}

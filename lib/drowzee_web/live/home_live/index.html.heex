@@ -640,8 +640,19 @@
                       <%= if @name do %>
                         <%= cond do %>
                           <% is_nil(c) -> %>
+                            <% # Resource not found %>
                             <span title="Resource not found in Kubernetes" class="text-red-500">
                               ❓
+                            </span>
+                          <% c && c["metadata"]["annotations"] && c["metadata"]["annotations"]["drowzee.io/scale-failed"] == "true" -> %>
+                            <span
+                              title={
+                                c["metadata"]["annotations"]["drowzee.io/scale-error"] ||
+                                  "Failed to scale"
+                              }
+                              class="text-amber-500"
+                            >
+                              ⚠️
                             </span>
                           <% c && Map.get(c["spec"], "suspend", false) == false -> %>
                             🚀
@@ -650,6 +661,30 @@
                         <% end %>
                       <% end %>
                       <span class="ml-1">{cronjob["name"]}</span>
+
+                      <% # Show error icon for suspend errors %>
+                      <%= if c && c["metadata"]["annotations"] && c["metadata"]["annotations"]["drowzee.io/suspend-failed"] == "true" do %>
+                        <span
+                          class="ml-1 text-red-500"
+                          title={
+                            c["metadata"]["annotations"]["drowzee.io/suspend-error"] ||
+                              "Failed to suspend/unsuspend"
+                          }
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="h-4 w-4 inline"
+                            viewBox="0 0 20 20"
+                            fill="currentColor"
+                          >
+                            <path
+                              fill-rule="evenodd"
+                              d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                              clip-rule="evenodd"
+                            />
+                          </svg>
+                        </span>
+                      <% end %>
                     </li>
                   <% end %>
                 </ul>
