@@ -472,11 +472,18 @@ defmodule Drowzee.K8s.SleepSchedule do
   def suspend_cronjobs(sleep_schedule) do
     Logger.debug("Suspending cronjobs...")
 
+    # Log the CronJobs entries from the sleep schedule
+    cronjob_entries = sleep_schedule["spec"]["cronjobs"] || []
+    Logger.debug("CronJobs entries: #{inspect(cronjob_entries)}")
+
     case get_cronjobs(sleep_schedule) do
       {:ok, cronjobs} ->
         # Process each cronjob and collect results
         scaling_result =
           Enum.reduce_while(cronjobs, {[], []}, fn cronjob, {successes, failures} ->
+            # Log the cronjob structure before calling suspend_cronjob
+            Logger.debug("About to suspend cronjob: #{inspect(cronjob)}")
+
             case CronJob.suspend_cronjob(cronjob, true) do
               {:ok, suspended_cronjob} ->
                 {:cont, {[suspended_cronjob | successes], failures}}

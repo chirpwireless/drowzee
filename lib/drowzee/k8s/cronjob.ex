@@ -7,8 +7,19 @@ defmodule Drowzee.K8s.CronJob do
 
   def suspend(cronjob), do: cronjob["spec"]["suspend"] || false
 
-  def suspend_cronjob(%{"kind" => "CronJob"} = cronjob, suspend) do
-    Logger.info("Setting cronjob suspend", name: name(cronjob), suspend: suspend)
+  # Main implementation for suspending a CronJob
+  def suspend_cronjob(cronjob, suspend) when is_map(cronjob) do
+    # Ensure the cronjob has a kind field
+    cronjob = Map.put_new(cronjob, "kind", "CronJob")
+
+    Logger.info("Setting cronjob suspend",
+      name: get_in(cronjob, ["metadata", "name"]),
+      suspend: suspend,
+      kind: cronjob["kind"]
+    )
+
+    # Ensure the spec field exists
+    cronjob = Map.put_new(cronjob, "spec", %{})
     cronjob = put_in(cronjob["spec"]["suspend"], suspend)
 
     case K8s.Client.run(Drowzee.K8s.conn(), K8s.Client.update(cronjob)) do
@@ -56,6 +67,26 @@ defmodule Drowzee.K8s.CronJob do
         {:error, failed_cronjob,
          "Failed to #{(suspend && "suspend") || "unsuspend"} cronjob #{name(cronjob)}: #{inspect(reason)}"}
     end
+  end
+
+  # Fallback clause for non-map CronJobs
+  def suspend_cronjob(cronjob, _suspend) do
+    type =
+      cond do
+        is_list(cronjob) -> "list"
+        is_binary(cronjob) -> "binary"
+        is_atom(cronjob) -> "atom"
+        is_number(cronjob) -> "number"
+        true -> "unknown"
+      end
+
+    Logger.error("Invalid CronJob format - not a map",
+      cronjob_type: type,
+      cronjob_inspect: inspect(cronjob)
+    )
+
+    {:error, %{"kind" => "CronJob", "metadata" => %{"name" => "unknown"}},
+     "Invalid CronJob format: expected a map"}
   end
 
   # Helper to ensure annotations exist

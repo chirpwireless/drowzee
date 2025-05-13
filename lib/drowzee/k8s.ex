@@ -160,6 +160,14 @@ defmodule Drowzee.K8s do
             [single_match] ->
               # Exactly one match - success
               resolved_name = single_match["metadata"]["name"]
+
+              Logger.debug("Resolved wildcard to single CronJob",
+                original_name: name,
+                resolved_name: resolved_name,
+                has_kind: Map.has_key?(single_match, "kind"),
+                kind: single_match["kind"]
+              )
+
               {:ok, single_match, resolved_name}
 
             multiple_matches ->
