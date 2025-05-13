@@ -160,15 +160,30 @@ defmodule Drowzee.K8s do
             [single_match] ->
               # Exactly one match - success
               resolved_name = single_match["metadata"]["name"]
-
-              Logger.debug("Resolved wildcard to single CronJob",
-                original_name: name,
-                resolved_name: resolved_name,
-                has_kind: Map.has_key?(single_match, "kind"),
-                kind: single_match["kind"]
-              )
-
-              {:ok, single_match, resolved_name}
+              
+              # Instead of modifying the object from the list, get the full object from the API
+              # This ensures we have the complete structure with apiVersion and kind
+              get_cronjob(resolved_name, namespace)
+              |> case do
+                {:ok, full_cronjob} ->
+                  Logger.debug("Resolved wildcard to single CronJob",
+                    original_name: name,
+                    resolved_name: resolved_name
+                  )
+                  {:ok, full_cronjob, resolved_name}
+                  
+                {:error, reason} ->
+                  Logger.error("Failed to get resolved CronJob",
+                    original_name: name,
+                    resolved_name: resolved_name,
+                    error: inspect(reason)
+                  )
+                  {:error,
+                   %{
+                     reason: "ResolvedCronJobNotFound",
+                     message: "Resolved CronJob not found: #{inspect(reason)}"
+                   }}
+              end
 
             multiple_matches ->
               # Multiple matches - error
