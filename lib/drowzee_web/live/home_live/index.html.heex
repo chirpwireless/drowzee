@@ -636,7 +636,8 @@
                 <ul class="grid grid-cols-2 gap-2 text-gray-700">
                   <%= for cronjob <- sleep_schedule["spec"]["cronjobs"] || [] do %>
                     <li class="bg-gray-100 rounded-lg px-3 py-1 text-sm">
-                      <% c = @cronjobs_by_name[cronjob["name"]] %>
+                      <% resolved_name = @resolved_wildcard_names[cronjob["name"]] %>
+                      <% c = if resolved_name, do: @cronjobs_by_name[resolved_name], else: @cronjobs_by_name[cronjob["name"]] %>
                       <%= if @name do %>
                         <%= cond do %>
                           <% is_nil(c) -> %>
