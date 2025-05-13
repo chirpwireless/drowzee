@@ -184,28 +184,29 @@ defmodule Drowzee.K8s.SleepSchedule do
       end)
       |> Enum.to_list()
 
-    # Separate successful and failed results
-    {found, missing} =
-      Enum.split_with(results, fn {_, result} -> match?({:ok, _}, result) end)
+    # Process each result to handle both tuple formats
+    {found_cronjobs, missing_resources} =
+      Enum.reduce(results, {[], []}, fn {name, result}, {found_acc, missing_acc} ->
+        case result do
+          {:ok, cronjob} ->
+            {[cronjob | found_acc], missing_acc}
 
-    found_cronjobs = Enum.map(found, fn {_, result} -> 
-      case result do
-        {:ok, cronjob} -> cronjob
-        {:ok, cronjob, _resolved_name} -> cronjob
-      end
-    end)
+          {:ok, cronjob, _resolved_name} ->
+            {[cronjob | found_acc], missing_acc}
 
-    missing_resources =
-      Enum.map(missing, fn {name, {:error, reason}} ->
-        %{
-          "kind" => "CronJob",
-          "name" => name,
-          "namespace" => namespace,
-          "error" => inspect(reason),
-          "reason" => reason.reason,
-          "message" => reason.message,
-          "status" => "NotFound"
-        }
+          {:error, reason} ->
+            missing_resource = %{
+              "kind" => "CronJob",
+              "name" => name,
+              "namespace" => namespace,
+              "error" => inspect(reason),
+              "reason" => reason.reason,
+              "message" => reason.message,
+              "status" => "NotFound"
+            }
+
+            {found_acc, [missing_resource | missing_acc]}
+        end
       end)
 
     if Enum.empty?(missing_resources) do
