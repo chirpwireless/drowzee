@@ -644,11 +644,11 @@
                             <span title="Resource not found in Kubernetes" class="text-red-500">
                               ❓
                             </span>
-                          <% c && c["metadata"]["annotations"] && c["metadata"]["annotations"]["drowzee.io/scale-failed"] == "true" -> %>
+                          <% c && c["metadata"]["annotations"] && c["metadata"]["annotations"]["drowzee.io/suspend-failed"] == "true" -> %>
                             <span
                               title={
-                                c["metadata"]["annotations"]["drowzee.io/scale-error"] ||
-                                  "Failed to scale"
+                                c["metadata"]["annotations"]["drowzee.io/suspend-error"] ||
+                                  "Failed to suspend/unsuspend"
                               }
                               class="text-amber-500"
                             >

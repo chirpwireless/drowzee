@@ -306,36 +306,55 @@ defmodule DrowzeeWeb.HomeLive.Index do
             end
 
           # Only fetch resources if we have a specific schedule
-          # This avoids unnecessary API calls
-          {deployments, statefulsets, cronjobs, missing_resources} =
+          {deployments, statefulsets, cronjobs, wildcard_map, missing_resources} =
             case schedules do
               [schedule] ->
                 try do
-                  # Check for missing resources annotation
-                  missing_resources = get_missing_resources(schedule)
+                  # Get missing resources
+                  missing = get_missing_resources(schedule)
 
-                  # Get available resources
-                  {
-                    Drowzee.K8s.get_deployments_for_schedule(schedule),
-                    Drowzee.K8s.get_statefulsets_for_schedule(schedule),
-                    Drowzee.K8s.get_cronjobs_for_schedule(schedule),
-                    missing_resources
-                  }
+                  # Get cronjobs with wildcard mapping
+                  {cjs, wmap} =
+                    case Drowzee.K8s.get_cronjobs_for_schedule(schedule) do
+                      {cronjobs, wildcard_map} when is_list(cronjobs) and is_map(wildcard_map) ->
+                        {cronjobs, wildcard_map}
+
+                      cronjobs when is_list(cronjobs) ->
+                        # Handle old format for backward compatibility
+                        {cronjobs, %{}}
+                    end
+
+                  # Get deployments and statefulsets
+                  deps = Drowzee.K8s.get_deployments_for_schedule(schedule)
+                  sts = Drowzee.K8s.get_statefulsets_for_schedule(schedule)
+
+                  # Return all resources
+                  {deps, sts, cjs, wmap, missing}
                 rescue
-                  _ -> {[], [], [], []}
+                  e ->
+                    # Log the error and continue with empty values
+                    Logger.error("Error fetching resources for sleep schedule: #{inspect(e)}")
+                    {[], [], [], %{}, []}
                 end
 
               _ ->
-                {[], [], [], []}
+                # No schedules found
+                {[], [], [], %{}, []}
             end
 
-          {
-            schedules,
-            Map.new(deployments, &{&1["metadata"]["name"], &1}),
-            Map.new(statefulsets, &{&1["metadata"]["name"], &1}),
-            Map.new(cronjobs, &{&1["metadata"]["name"], &1}),
-            missing_resources
-          }
+          # Create maps for each resource type
+          deps_by_name = Map.new(deployments, &{&1["metadata"]["name"], &1})
+          sts_by_name = Map.new(statefulsets, &{&1["metadata"]["name"], &1})
+
+          # Create a map of CronJob names to CronJobs
+          cjs_by_name = Map.new(cronjobs, &{&1["metadata"]["name"], &1})
+
+          # Merge with wildcard mappings to include both original wildcard patterns and resolved CronJobs
+          # This ensures that wildcard patterns in the sleep schedule spec will map to their resolved CronJobs
+          cjs_by_name = Map.merge(cjs_by_name, wildcard_map)
+
+          # Return the schedules and resource maps
+          {schedules, deps_by_name, sts_by_name, cjs_by_name, missing_resources}
       end
 
     # Handle namespace statuses based on the current view
@@ -373,6 +392,7 @@ defmodule DrowzeeWeb.HomeLive.Index do
     |> assign(:statefulsets_by_name, statefulsets_by_name)
     |> assign(:cronjobs_by_name, cronjobs_by_name)
     |> assign(:missing_resources, missing_resources)
+    |> assign(:loading, false)
     |> filter_sleep_schedules(socket.assigns.search)
   end
 

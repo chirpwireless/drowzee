@@ -303,7 +303,24 @@ defmodule Drowzee.K8s do
       update_resolved_wildcard_names(sleep_schedule, updated_resolved_names)
     end
 
-    cronjobs
+    # Create a map of wildcard patterns to their resolved CronJobs
+    wildcard_to_cronjob_map =
+      Enum.reduce(cronjobs, %{}, fn cronjob, acc ->
+        # For each CronJob, check if it was resolved from a wildcard
+        wildcard_patterns =
+          Enum.filter(resolved_names_map, fn {_pattern, resolved_name} ->
+            resolved_name == cronjob["metadata"]["name"]
+          end)
+          |> Enum.map(fn {pattern, _} -> pattern end)
+
+        # Add mappings from each wildcard pattern to this CronJob
+        Enum.reduce(wildcard_patterns, acc, fn pattern, inner_acc ->
+          Map.put(inner_acc, pattern, cronjob)
+        end)
+      end)
+
+    # Return both the CronJobs and the wildcard mapping
+    {cronjobs, wildcard_to_cronjob_map}
   end
 
   # Get the resolved wildcard names from the sleep schedule annotations
