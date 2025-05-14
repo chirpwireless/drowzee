@@ -160,7 +160,7 @@ defmodule Drowzee.K8s do
             [single_match] ->
               # Exactly one match - success
               resolved_name = single_match["metadata"]["name"]
-              
+
               # Instead of modifying the object from the list, get the full object from the API
               # This ensures we have the complete structure with apiVersion and kind
               get_cronjob(resolved_name, namespace)
@@ -170,14 +170,16 @@ defmodule Drowzee.K8s do
                     original_name: name,
                     resolved_name: resolved_name
                   )
+
                   {:ok, full_cronjob, resolved_name}
-                  
+
                 {:error, reason} ->
                   Logger.error("Failed to get resolved CronJob",
                     original_name: name,
                     resolved_name: resolved_name,
                     error: inspect(reason)
                   )
+
                   {:error,
                    %{
                      reason: "ResolvedCronJobNotFound",

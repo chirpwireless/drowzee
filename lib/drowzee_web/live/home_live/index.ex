@@ -14,7 +14,7 @@ defmodule DrowzeeWeb.HomeLive.Index do
       Phoenix.PubSub.subscribe(Drowzee.PubSub, "sleep_schedule:updates")
 
       # Schedule periodic refresh to prevent connection issues
-      Process.send_after(self(), :refresh, @refresh_interval)
+      Process.send_after(self(), :refresh_schedules, @refresh_interval)
     end
 
     socket =
