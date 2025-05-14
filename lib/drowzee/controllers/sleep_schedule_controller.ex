@@ -245,20 +245,20 @@ defmodule Drowzee.Controller.SleepScheduleController do
   # Coordination mechanism for scaling operations with prioritization
   # Uses an Agent to coordinate scaling operations across multiple schedules
 
-  # Start the coordinator when the application starts
+  # Start the coordinator when the application starts - this is now handled by CoordinatorSupervisor
   def start_coordinator do
-    Agent.start_link(fn -> %{queue: [], processing: false} end, name: __MODULE__.Coordinator)
+    # This is kept for backwards compatibility but is now a no-op
+    # The actual coordinator is started by the CoordinatorSupervisor
+    :ok
   end
 
   # Add a scaling operation to the queue with priority
   defp queue_scaling_operation(operation, resource, priority) do
-    Agent.update(__MODULE__.Coordinator, fn state = %{queue: queue} ->
-      # Add operation to queue with priority (lower number = higher priority)
-      new_queue = queue ++ [{priority, operation, resource}]
-      # Sort by priority
-      sorted_queue = Enum.sort(new_queue, fn {p1, _, _}, {p2, _, _} -> p1 <= p2 end)
-      %{state | queue: sorted_queue}
-    end)
+    # Use GenServer.cast instead of Agent.update
+    GenServer.cast(
+      __MODULE__.Coordinator,
+      {:add_operation, operation, resource, priority}
+    )
 
     # Start processing if not already running
     spawn(fn -> process_queue() end)
@@ -266,76 +266,132 @@ defmodule Drowzee.Controller.SleepScheduleController do
 
   # Process the queue of scaling operations
   defp process_queue do
-    # Try to acquire the processing lock
-    Agent.get_and_update(__MODULE__.Coordinator, fn
-      %{processing: true} = state ->
-        # Already processing, do nothing
-        {false, state}
-
-      %{processing: false, queue: []} = state ->
-        # Nothing to process
-        {false, state}
-
-      %{processing: false, queue: _} = state ->
-        # Start processing
-        {true, %{state | processing: true}}
-    end)
-    |> case do
+    # Try to acquire the processing lock using GenServer.call
+    case GenServer.call(__MODULE__.Coordinator, :get_and_update_processing) do
       # Already processing or nothing to do
       false -> :ok
+      # Start processing
       true -> do_process_queue()
+    end
+  rescue
+    e ->
+      Logger.error("Error in process_queue when calling coordinator: #{inspect(e)}")
+      # Wait a bit and try again
+      Process.sleep(1000)
+      process_queue()
+  end
+
+  # Process the queue items one by one with improved error handling and rate limiting
+  defp do_process_queue do
+    try do
+      # Use GenServer.call instead of Agent.get_and_update
+      case GenServer.call(__MODULE__.Coordinator, :get_next_operation) do
+        :done ->
+          :ok
+
+        {operation, resource} ->
+          # Execute the operation with timeout protection
+          execute_operation_with_timeout(operation, resource)
+
+          # Process the next item regardless of success/failure
+          # Add a longer delay between operations to avoid overwhelming the Kubernetes API
+          # Increased from 200ms to 500ms
+          Process.sleep(500)
+          do_process_queue()
+      end
+    rescue
+      e ->
+        Logger.error("Error in process_queue: #{inspect(e)}")
+        # Mark the coordinator as not processing so it can be restarted
+        reset_coordinator_state()
+        # Continue processing the queue despite errors
+        Process.sleep(1000)
+        do_process_queue()
     end
   end
 
-  # Process the queue items one by one
-  defp do_process_queue do
-    Agent.get_and_update(__MODULE__.Coordinator, fn
-      %{queue: []} = state ->
-        # Queue is empty, stop processing
-        {:done, %{state | processing: false}}
+  # Reset the coordinator state if it gets stuck
+  defp reset_coordinator_state do
+    try do
+      Agent.update(__MODULE__.Coordinator, fn state ->
+        %{state | processing: false}
+      end)
+    rescue
+      _ -> :ok
+    end
+  end
 
-      %{queue: [{_priority, operation, resource} | rest]} = state ->
-        # Get the next operation and update the queue
-        {{operation, resource}, %{state | queue: rest}}
-    end)
-    |> case do
-      :done ->
+  # Execute an operation with timeout protection
+  defp execute_operation_with_timeout(operation, resource) do
+    # Use Task.yield_many with a longer timeout (30 seconds instead of default 5)
+    task = Task.async(fn -> apply_scaling_operation_safely(operation, resource) end)
+
+    # Wait for the task to complete with a timeout
+    case Task.yield(task, 30_000) || Task.shutdown(task) do
+      {:ok, result} ->
+        # Task completed successfully
+        handle_operation_result(result, resource)
+
+      nil ->
+        # Task didn't complete within the timeout
+        Logger.error("Operation timed out: #{inspect(operation)}")
+        # Update the resource with an error condition
+        updated_resource = add_timeout_error(resource, operation)
+        update_resource_status(updated_resource)
+    end
+  end
+
+  # Apply scaling operation with additional error handling
+  defp apply_scaling_operation_safely(operation, resource) do
+    try do
+      apply_scaling_operation(operation, resource)
+    rescue
+      e ->
+        Logger.error("Error executing scaling operation: #{inspect(operation)}, #{inspect(e)}")
+        {:error, "Exception: #{inspect(e)}", resource}
+    catch
+      kind, reason ->
+        Logger.error("Caught #{kind} in scaling operation: #{inspect(reason)}")
+        {:error, "Caught #{kind}: #{inspect(reason)}", resource}
+    end
+  end
+
+  # Handle the result of an operation
+  defp handle_operation_result(result, _resource) do
+    case result do
+      {:ok, _results} ->
+        # Operation succeeded, continue normally
         :ok
 
-      {operation, resource} ->
-        # Execute the operation
-        try do
-          result = apply_scaling_operation(operation, resource)
+      {:partial, _results, _errors, updated_resource} ->
+        # Some operations failed but we continue
+        # Update the resource in the K8s API with the error condition
+        update_resource_status(updated_resource)
 
-          # Handle the result based on its type
-          case result do
-            {:ok, _results} ->
-              # Operation succeeded, continue normally
-              :ok
-
-            {:partial, _results, _errors, updated_resource} ->
-              # Some operations failed but we continue
-              # Update the resource in the K8s API with the error condition
-              update_resource_status(updated_resource)
-
-            {:error, _error, updated_resource} ->
-              # Operation failed completely but we continue
-              # Update the resource in the K8s API with the error condition
-              update_resource_status(updated_resource)
-          end
-
-          # Small delay to avoid overwhelming the Kubernetes API
-          Process.sleep(200)
-        rescue
-          e ->
-            Logger.error(
-              "Error executing scaling operation: #{inspect(operation)}, #{inspect(e)}"
-            )
-        end
-
-        # Process the next item regardless of success/failure
-        do_process_queue()
+      {:error, _error, updated_resource} ->
+        # Operation failed completely but we continue
+        # Update the resource in the K8s API with the error condition
+        update_resource_status(updated_resource)
     end
+  end
+
+  # Add a timeout error to the resource
+  defp add_timeout_error(resource, operation) do
+    resource
+    |> put_in(
+      ["status", "conditions"],
+      (resource["status"]["conditions"] || [])
+      |> Enum.reject(fn condition -> condition["type"] == "Error" end)
+      |> Enum.concat([
+        %{
+          "type" => "Error",
+          "status" => "True",
+          "reason" => "OperationTimeout",
+          "message" => "Operation timed out: #{inspect(operation)}",
+          "lastTransitionTime" => DateTime.utc_now() |> DateTime.to_iso8601()
+        }
+      ])
+    )
   end
 
   # Apply the actual scaling operation
