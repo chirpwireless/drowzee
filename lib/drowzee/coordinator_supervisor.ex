@@ -90,6 +90,19 @@ defmodule Drowzee.CoordinatorAgent do
     new_queue = queue ++ [{priority, operation, resource}]
     # Sort by priority
     sorted_queue = Enum.sort(new_queue, fn {p1, _, _}, {p2, _, _} -> p1 <= p2 end)
+    
+    # Log the operation being added
+    Logger.debug("Added operation to queue: #{inspect(operation)} with priority #{priority}")
+    Logger.debug("Current queue: #{inspect(sorted_queue)}")
+    
+    # Automatically start processing if not already processing
+    if not state.processing and length(sorted_queue) > 0 do
+      # Set processing to true to prevent multiple processes
+      GenServer.call(__MODULE__, :get_and_update_processing)
+      # Notify the controller to process the queue
+      Process.send_after(self(), :process_queue, 100)
+    end
+    
     {:noreply, %{state | queue: sorted_queue}}
   end
 
@@ -99,11 +112,61 @@ defmodule Drowzee.CoordinatorAgent do
     {:noreply, %{state | processing: false}}
   end
 
+  # Handle the process_queue message
+  @impl true
+  def handle_info(:process_queue, state) do
+    Logger.debug("CoordinatorAgent processing queue")
+    # Process one item from the queue
+    case process_next_operation(state) do
+      {:ok, new_state} ->
+        # Schedule processing of the next item if there are more items in the queue
+        if length(new_state.queue) > 0 do
+          Process.send_after(self(), :process_queue, 500) # Add delay between operations
+        end
+        {:noreply, new_state}
+      {:error, reason} ->
+        Logger.error("Error processing queue: #{inspect(reason)}")
+        # Reset processing state and try again later
+        Process.send_after(self(), :process_queue, 1000)
+        {:noreply, %{state | processing: false}}
+    end
+  end
+
   # Handle unexpected messages
   @impl true
   def handle_info(msg, state) do
     Logger.warning("CoordinatorAgent received unexpected message: #{inspect(msg)}")
     {:noreply, state}
+  end
+  
+  # Process the next operation in the queue
+  defp process_next_operation(%{queue: []}) do
+    # Queue is empty, nothing to process
+    {:ok, %{queue: [], processing: false}}
+  end
+  
+  defp process_next_operation(%{queue: [{_priority, operation, resource} | rest]}) do
+    try do
+      # Call the appropriate function in SleepSchedule module
+      result = case operation do
+        :scale_down_statefulsets -> Drowzee.K8s.SleepSchedule.scale_down_statefulsets(resource)
+        :scale_down_deployments -> Drowzee.K8s.SleepSchedule.scale_down_deployments(resource)
+        :suspend_cronjobs -> Drowzee.K8s.SleepSchedule.suspend_cronjobs(resource)
+        :scale_up_statefulsets -> Drowzee.K8s.SleepSchedule.scale_up_statefulsets(resource)
+        :scale_up_deployments -> Drowzee.K8s.SleepSchedule.scale_up_deployments(resource)
+        :resume_cronjobs -> Drowzee.K8s.SleepSchedule.resume_cronjobs(resource)
+      end
+      
+      # Log the result
+      Logger.info("Processed operation #{inspect(operation)}: #{inspect(result)}")
+      
+      # Return the new state with the operation removed from the queue
+      {:ok, %{queue: rest, processing: true}}
+    rescue
+      e ->
+        Logger.error("Error processing operation #{inspect(operation)}: #{inspect(e)}")
+        {:error, e}
+    end
   end
 
   # Terminate callback for cleanup
