@@ -14,24 +14,8 @@ defmodule Drowzee.K8s.CronJob do
 
     case K8s.Client.run(Drowzee.K8s.conn(), K8s.Client.update(cronjob)) do
       {:ok, cronjob} ->
-        # Clear any previous failure annotations if they exist
-        cronjob =
-          pop_in(cronjob, [
-            "metadata",
-            "annotations",
-            "drowzee.io/suspend-failed"
-          ])
-          |> elem(1)
-
-        cronjob =
-          pop_in(cronjob, [
-            "metadata",
-            "annotations",
-            "drowzee.io/suspend-error"
-          ])
-          |> elem(1)
-
-        {:ok, cronjob}
+        # Clear any previous failure annotations using the common utility function
+        Drowzee.K8s.ResourceUtils.clear_error_annotations(cronjob, :cronjob)
 
       {:error, reason} ->
         Logger.error("Failed to suspend cronjob: #{inspect(reason)}",
