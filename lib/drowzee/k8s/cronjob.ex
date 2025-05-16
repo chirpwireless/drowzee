@@ -23,23 +23,21 @@ defmodule Drowzee.K8s.CronJob do
           suspend: suspend
         )
 
-        # Mark this specific resource as failed
-        failed_cronjob =
-          ensure_annotations(cronjob)
-          |> put_in(
-            ["metadata", "annotations", "drowzee.io/suspend-failed"],
-            "true"
-          )
-
-        failed_cronjob =
-          put_in(
-            failed_cronjob,
-            ["metadata", "annotations", "drowzee.io/suspend-error"],
-            "Failed to #{(suspend && "suspend") || "unsuspend"}: #{inspect(reason)}"
-          )
-
-        {:error, failed_cronjob,
-         "Failed to #{(suspend && "suspend") || "unsuspend"} cronjob #{name(cronjob)}: #{inspect(reason)}"}
+        # Create error message
+        error_message = "Failed to #{(suspend && "suspend") || "unsuspend"}: #{inspect(reason)}"
+        
+        # Mark this specific resource as failed using centralized function
+        # First ensure annotations exist
+        cronjob_with_annotations = ensure_annotations(cronjob)
+        
+        case Drowzee.K8s.ResourceUtils.set_error_annotations(cronjob_with_annotations, :cronjob, error_message) do
+          {:ok, failed_cronjob} ->
+            {:error, failed_cronjob, "Failed to #{(suspend && "suspend") || "unsuspend"} cronjob #{name(cronjob)}: #{inspect(reason)}"}
+          
+          {:error, _} ->
+            # If updating annotations fails, still return the original error
+            {:error, cronjob, "Failed to #{(suspend && "suspend") || "unsuspend"} cronjob #{name(cronjob)}: #{inspect(reason)}"}
+        end
     end
   end
 

@@ -92,52 +92,40 @@ defmodule Drowzee.K8s.Deployment do
           {:ok, scaled_deployment}
 
         {:error, reason} ->
-          # Mark as failed with annotations
-          failed_deployment =
-            put_in(deployment, ["metadata", "annotations", "drowzee.io/scale-failed"], "true")
-
-          failed_deployment =
-            put_in(
-              failed_deployment,
-              ["metadata", "annotations", "drowzee.io/scale-error"],
-              "Failed to scale: #{inspect(reason)}"
-            )
-
-          {:error, failed_deployment,
-           "Failed to scale down deployment #{name(deployment)}: #{inspect(reason)}"}
+          # Mark as failed with annotations using centralized function
+          case Drowzee.K8s.ResourceUtils.set_error_annotations(deployment, :deployment, "Failed to scale: #{inspect(reason)}") do
+            {:ok, failed_deployment} ->
+              {:error, failed_deployment, "Failed to scale down deployment #{name(deployment)}: #{inspect(reason)}"}
+            
+            {:error, _} ->
+              # If updating annotations fails, still return the original error
+              {:error, deployment, "Failed to scale down deployment #{name(deployment)}: #{inspect(reason)}"}
+          end
       end
     rescue
       e ->
         Logger.error("Error scaling down deployment: #{inspect(e)}", name: name(deployment))
-        # Mark as failed with annotations
-        failed_deployment =
-          put_in(deployment, ["metadata", "annotations", "drowzee.io/scale-failed"], "true")
-
-        failed_deployment =
-          put_in(
-            failed_deployment,
-            ["metadata", "annotations", "drowzee.io/scale-error"],
-            "Exception: #{inspect(e)}"
-          )
-
-        {:error, failed_deployment,
-         "Failed to scale down deployment #{name(deployment)}: #{inspect(e)}"}
+        # Mark as failed with annotations using centralized function
+        case Drowzee.K8s.ResourceUtils.set_error_annotations(deployment, :deployment, "Exception: #{inspect(e)}") do
+          {:ok, failed_deployment} ->
+            {:error, failed_deployment, "Failed to scale down deployment #{name(deployment)}: #{inspect(e)}"}
+          
+          {:error, _} ->
+            # If updating annotations fails, still return the original error
+            {:error, deployment, "Failed to scale down deployment #{name(deployment)}: #{inspect(e)}"}
+        end
     catch
       kind, reason ->
         Logger.error("Error scaling down deployment: #{inspect(reason)}", name: name(deployment))
-        # Mark as failed with annotations
-        failed_deployment =
-          put_in(deployment, ["metadata", "annotations", "drowzee.io/scale-failed"], "true")
-
-        failed_deployment =
-          put_in(
-            failed_deployment,
-            ["metadata", "annotations", "drowzee.io/scale-error"],
-            "Caught #{kind}: #{inspect(reason)}"
-          )
-
-        {:error, failed_deployment,
-         "Failed to scale down deployment #{name(deployment)}: #{inspect(reason)}"}
+        # Mark as failed with annotations using centralized function
+        case Drowzee.K8s.ResourceUtils.set_error_annotations(deployment, :deployment, "Caught #{kind}: #{inspect(reason)}") do
+          {:ok, failed_deployment} ->
+            {:error, failed_deployment, "Failed to scale down deployment #{name(deployment)}: #{inspect(reason)}"}
+          
+          {:error, _} ->
+            # If updating annotations fails, still return the original error
+            {:error, deployment, "Failed to scale down deployment #{name(deployment)}: #{inspect(reason)}"}
+        end
     end
   end
 
@@ -157,52 +145,40 @@ defmodule Drowzee.K8s.Deployment do
           Drowzee.K8s.ResourceUtils.clear_error_annotations(scaled_deployment, :deployment)
 
         {:error, reason} ->
-          # Mark as failed with annotations
-          failed_deployment =
-            put_in(deployment, ["metadata", "annotations", "drowzee.io/scale-failed"], "true")
-
-          failed_deployment =
-            put_in(
-              failed_deployment,
-              ["metadata", "annotations", "drowzee.io/scale-error"],
-              "Failed to scale: #{inspect(reason)}"
-            )
-
-          {:error, failed_deployment,
-           "Failed to scale up deployment #{name(deployment)}: #{inspect(reason)}"}
+          # Mark as failed with annotations using centralized function
+          case Drowzee.K8s.ResourceUtils.set_error_annotations(deployment, :deployment, "Failed to scale: #{inspect(reason)}") do
+            {:ok, failed_deployment} ->
+              {:error, failed_deployment, "Failed to scale up deployment #{name(deployment)}: #{inspect(reason)}"}
+            
+            {:error, _} ->
+              # If updating annotations fails, still return the original error
+              {:error, deployment, "Failed to scale up deployment #{name(deployment)}: #{inspect(reason)}"}
+          end
       end
     rescue
       e ->
         Logger.error("Error scaling up deployment: #{inspect(e)}", name: name(deployment))
-        # Mark as failed with annotations
-        failed_deployment =
-          put_in(deployment, ["metadata", "annotations", "drowzee.io/scale-failed"], "true")
-
-        failed_deployment =
-          put_in(
-            failed_deployment,
-            ["metadata", "annotations", "drowzee.io/scale-error"],
-            "Exception: #{inspect(e)}"
-          )
-
-        {:error, failed_deployment,
-         "Failed to scale up deployment #{name(deployment)}: #{inspect(e)}"}
+        # Mark as failed with annotations using centralized function
+        case Drowzee.K8s.ResourceUtils.set_error_annotations(deployment, :deployment, "Exception: #{inspect(e)}") do
+          {:ok, failed_deployment} ->
+            {:error, failed_deployment, "Failed to scale up deployment #{name(deployment)}: #{inspect(e)}"}
+          
+          {:error, _} ->
+            # If updating annotations fails, still return the original error
+            {:error, deployment, "Failed to scale up deployment #{name(deployment)}: #{inspect(e)}"}
+        end
     catch
       kind, reason ->
         Logger.error("Error scaling up deployment: #{inspect(reason)}", name: name(deployment))
-        # Mark as failed with annotations
-        failed_deployment =
-          put_in(deployment, ["metadata", "annotations", "drowzee.io/scale-failed"], "true")
-
-        failed_deployment =
-          put_in(
-            failed_deployment,
-            ["metadata", "annotations", "drowzee.io/scale-error"],
-            "Caught #{kind}: #{inspect(reason)}"
-          )
-
-        {:error, failed_deployment,
-         "Failed to scale up deployment #{name(deployment)}: #{inspect(reason)}"}
+        # Mark as failed with annotations using centralized function
+        case Drowzee.K8s.ResourceUtils.set_error_annotations(deployment, :deployment, "Caught #{kind}: #{inspect(reason)}") do
+          {:ok, failed_deployment} ->
+            {:error, failed_deployment, "Failed to scale up deployment #{name(deployment)}: #{inspect(reason)}"}
+          
+          {:error, _} ->
+            # If updating annotations fails, still return the original error
+            {:error, deployment, "Failed to scale up deployment #{name(deployment)}: #{inspect(reason)}"}
+        end
     end
   end
 end

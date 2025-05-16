@@ -92,55 +92,43 @@ defmodule Drowzee.K8s.StatefulSet do
           {:ok, scaled_statefulset}
 
         {:error, reason} ->
-          # Mark as failed with annotations
-          failed_statefulset =
-            put_in(statefulset, ["metadata", "annotations", "drowzee.io/scale-failed"], "true")
-
-          failed_statefulset =
-            put_in(
-              failed_statefulset,
-              ["metadata", "annotations", "drowzee.io/scale-error"],
-              "Failed to scale: #{inspect(reason)}"
-            )
-
-          {:error, failed_statefulset,
-           "Failed to scale down statefulset #{name(statefulset)}: #{inspect(reason)}"}
+          # Mark as failed with annotations using centralized function
+          case Drowzee.K8s.ResourceUtils.set_error_annotations(statefulset, :statefulset, "Failed to scale: #{inspect(reason)}") do
+            {:ok, failed_statefulset} ->
+              {:error, failed_statefulset, "Failed to scale down statefulset #{name(statefulset)}: #{inspect(reason)}"}
+            
+            {:error, _} ->
+              # If updating annotations fails, still return the original error
+              {:error, statefulset, "Failed to scale down statefulset #{name(statefulset)}: #{inspect(reason)}"}
+          end
       end
     rescue
       e ->
         Logger.error("Error scaling down statefulset: #{inspect(e)}", name: name(statefulset))
-        # Mark as failed with annotations
-        failed_statefulset =
-          put_in(statefulset, ["metadata", "annotations", "drowzee.io/scale-failed"], "true")
-
-        failed_statefulset =
-          put_in(
-            failed_statefulset,
-            ["metadata", "annotations", "drowzee.io/scale-error"],
-            "Exception: #{inspect(e)}"
-          )
-
-        {:error, failed_statefulset,
-         "Failed to scale down statefulset #{name(statefulset)}: #{inspect(e)}"}
+        # Mark as failed with annotations using centralized function
+        case Drowzee.K8s.ResourceUtils.set_error_annotations(statefulset, :statefulset, "Exception: #{inspect(e)}") do
+          {:ok, failed_statefulset} ->
+            {:error, failed_statefulset, "Failed to scale down statefulset #{name(statefulset)}: #{inspect(e)}"}
+          
+          {:error, _} ->
+            # If updating annotations fails, still return the original error
+            {:error, statefulset, "Failed to scale down statefulset #{name(statefulset)}: #{inspect(e)}"}
+        end
     catch
       kind, reason ->
         Logger.error("Error scaling down statefulset: #{inspect(reason)}",
           name: name(statefulset)
         )
 
-        # Mark as failed with annotations
-        failed_statefulset =
-          put_in(statefulset, ["metadata", "annotations", "drowzee.io/scale-failed"], "true")
-
-        failed_statefulset =
-          put_in(
-            failed_statefulset,
-            ["metadata", "annotations", "drowzee.io/scale-error"],
-            "Caught #{kind}: #{inspect(reason)}"
-          )
-
-        {:error, failed_statefulset,
-         "Failed to scale down statefulset #{name(statefulset)}: #{inspect(reason)}"}
+        # Mark as failed with annotations using centralized function
+        case Drowzee.K8s.ResourceUtils.set_error_annotations(statefulset, :statefulset, "Caught #{kind}: #{inspect(reason)}") do
+          {:ok, failed_statefulset} ->
+            {:error, failed_statefulset, "Failed to scale down statefulset #{name(statefulset)}: #{inspect(reason)}"}
+          
+          {:error, _} ->
+            # If updating annotations fails, still return the original error
+            {:error, statefulset, "Failed to scale down statefulset #{name(statefulset)}: #{inspect(reason)}"}
+        end
     end
   end
 
@@ -160,52 +148,40 @@ defmodule Drowzee.K8s.StatefulSet do
           Drowzee.K8s.ResourceUtils.clear_error_annotations(scaled_statefulset, :statefulset)
 
         {:error, reason} ->
-          # Mark as failed with annotations
-          failed_statefulset =
-            put_in(statefulset, ["metadata", "annotations", "drowzee.io/scale-failed"], "true")
-
-          failed_statefulset =
-            put_in(
-              failed_statefulset,
-              ["metadata", "annotations", "drowzee.io/scale-error"],
-              "Failed to scale: #{inspect(reason)}"
-            )
-
-          {:error, failed_statefulset,
-           "Failed to scale up statefulset #{name(statefulset)}: #{inspect(reason)}"}
+          # Mark as failed with annotations using centralized function
+          case Drowzee.K8s.ResourceUtils.set_error_annotations(statefulset, :statefulset, "Failed to scale: #{inspect(reason)}") do
+            {:ok, failed_statefulset} ->
+              {:error, failed_statefulset, "Failed to scale up statefulset #{name(statefulset)}: #{inspect(reason)}"}
+            
+            {:error, _} ->
+              # If updating annotations fails, still return the original error
+              {:error, statefulset, "Failed to scale up statefulset #{name(statefulset)}: #{inspect(reason)}"}
+          end
       end
     rescue
       e ->
         Logger.error("Error scaling up statefulset: #{inspect(e)}", name: name(statefulset))
-        # Mark as failed with annotations
-        failed_statefulset =
-          put_in(statefulset, ["metadata", "annotations", "drowzee.io/scale-failed"], "true")
-
-        failed_statefulset =
-          put_in(
-            failed_statefulset,
-            ["metadata", "annotations", "drowzee.io/scale-error"],
-            "Exception: #{inspect(e)}"
-          )
-
-        {:error, failed_statefulset,
-         "Failed to scale up statefulset #{name(statefulset)}: #{inspect(e)}"}
+        # Mark as failed with annotations using centralized function
+        case Drowzee.K8s.ResourceUtils.set_error_annotations(statefulset, :statefulset, "Exception: #{inspect(e)}") do
+          {:ok, failed_statefulset} ->
+            {:error, failed_statefulset, "Failed to scale up statefulset #{name(statefulset)}: #{inspect(e)}"}
+          
+          {:error, _} ->
+            # If updating annotations fails, still return the original error
+            {:error, statefulset, "Failed to scale up statefulset #{name(statefulset)}: #{inspect(e)}"}
+        end
     catch
       kind, reason ->
         Logger.error("Error scaling up statefulset: #{inspect(reason)}", name: name(statefulset))
-        # Mark as failed with annotations
-        failed_statefulset =
-          put_in(statefulset, ["metadata", "annotations", "drowzee.io/scale-failed"], "true")
-
-        failed_statefulset =
-          put_in(
-            failed_statefulset,
-            ["metadata", "annotations", "drowzee.io/scale-error"],
-            "Caught #{kind}: #{inspect(reason)}"
-          )
-
-        {:error, failed_statefulset,
-         "Failed to scale up statefulset #{name(statefulset)}: #{inspect(reason)}"}
+        # Mark as failed with annotations using centralized function
+        case Drowzee.K8s.ResourceUtils.set_error_annotations(statefulset, :statefulset, "Caught #{kind}: #{inspect(reason)}") do
+          {:ok, failed_statefulset} ->
+            {:error, failed_statefulset, "Failed to scale up statefulset #{name(statefulset)}: #{inspect(reason)}"}
+          
+          {:error, _} ->
+            # If updating annotations fails, still return the original error
+            {:error, statefulset, "Failed to scale up statefulset #{name(statefulset)}: #{inspect(reason)}"}
+        end
     end
   end
 end
