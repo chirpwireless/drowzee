@@ -167,8 +167,12 @@ defmodule Drowzee.CoordinatorAgent do
           :resume_cronjobs -> Drowzee.K8s.SleepSchedule.resume_cronjobs(resource)
         end
 
-      # Log the result
-      Logger.info("Processed operation #{inspect(operation)}: #{inspect(result)}")
+      # Log the result - concise info, detailed debug
+      Logger.info(
+        "Processed #{operation} for #{resource["metadata"]["name"]} in #{resource["metadata"]["namespace"]}: #{elem(result, 0)}"
+      )
+
+      Logger.debug("Operation details: #{inspect(operation)}: #{inspect(result)}")
 
       # Return the new state with the operation removed from the queue
       {:ok, %{queue: rest, processing: true}}
