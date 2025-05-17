@@ -86,40 +86,56 @@ defmodule Drowzee.CoordinatorAgent do
 
   @impl true
   def handle_cast({:add_operation, operation, resource, priority}, state = %{queue: queue}) do
-    # Add operation to queue with priority (lower number = higher priority)
-    new_queue = queue ++ [{priority, operation, resource}]
-    # Sort by priority
-    sorted_queue = Enum.sort(new_queue, fn {p1, _, _}, {p2, _, _} -> p1 <= p2 end)
+    # Check if this operation already exists in the queue
+    if operation_exists_in_queue?(queue, operation, resource) do
+      Logger.info(
+        "Operation #{operation} for #{resource["metadata"]["namespace"]}/#{resource["metadata"]["name"]} already in queue, skipping"
+      )
 
-    # Log the operation being added
-    Logger.debug(
-      "Added operation to queue: #{inspect(operation)} for #{resource["metadata"]["namespace"]}/#{resource["metadata"]["name"]} with priority #{priority}"
-    )
+      {:noreply, state}
+    else
+      # Add operation to queue with priority (lower number = higher priority)
+      new_queue = queue ++ [{priority, operation, resource}]
+      # Sort by priority
+      sorted_queue = Enum.sort(new_queue, fn {p1, _, _}, {p2, _, _} -> p1 <= p2 end)
 
-    # Create a more concise representation of the queue for logging
-    queue_summary =
-      Enum.map(sorted_queue, fn {p, op, res} ->
-        "#{op} for #{res["metadata"]["namespace"]}/#{res["metadata"]["name"]} (priority: #{p})"
-      end)
-      |> Enum.join(", ")
+      Logger.debug(
+        "Added operation to queue: #{inspect(operation)} for #{resource["metadata"]["namespace"]}/#{resource["metadata"]["name"]} with priority #{priority}"
+      )
 
-    Logger.debug("Current queue: #{queue_summary}")
+      # Create a concise representation of the queue for logging
+      queue_summary =
+        Enum.map(sorted_queue, fn {p, op, res} ->
+          "#{op} for #{res["metadata"]["namespace"]}/#{res["metadata"]["name"]} (priority: #{p})"
+        end)
+        |> Enum.join(", ")
 
-    # Automatically start processing if not already processing
-    new_state =
-      if not state.processing and length(sorted_queue) > 0 do
-        # Mark as processing directly in the state
-        # Don't call ourselves - that would cause a deadlock
-        # Just send the process_queue message
-        Process.send_after(self(), :process_queue, 100)
-        # Update the state to mark as processing
-        %{state | queue: sorted_queue, processing: true}
-      else
-        # Just update the queue
-        %{state | queue: sorted_queue}
-      end
+      Logger.debug("Current queue: #{queue_summary}")
 
-    {:noreply, new_state}
+      # Automatically start processing if not already processing
+      new_state =
+        if not state.processing and length(sorted_queue) > 0 do
+          # Mark as processing directly in the state
+          # Don't call ourselves - that would cause a deadlock
+          # Just send the process_queue message
+          Process.send_after(self(), :process_queue, 100)
+          # Update the state to mark as processing
+          %{state | queue: sorted_queue, processing: true}
+        else
+          # Just update the queue
+          %{state | queue: sorted_queue}
+        end
+
+      {:noreply, new_state}
+    end
+  end
+
+  defp operation_exists_in_queue?(queue, operation, resource) do
+    Enum.any?(queue, fn {_, op, res} ->
+      op == operation &&
+        res["metadata"]["name"] == resource["metadata"]["name"] &&
+        res["metadata"]["namespace"] == resource["metadata"]["namespace"]
+    end)
   end
 
   @impl true
