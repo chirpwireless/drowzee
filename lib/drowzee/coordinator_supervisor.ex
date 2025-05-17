@@ -92,8 +92,18 @@ defmodule Drowzee.CoordinatorAgent do
     sorted_queue = Enum.sort(new_queue, fn {p1, _, _}, {p2, _, _} -> p1 <= p2 end)
 
     # Log the operation being added
-    Logger.debug("Added operation to queue: #{inspect(operation)} with priority #{priority}")
-    Logger.debug("Current queue: #{inspect(sorted_queue)}")
+    Logger.debug(
+      "Added operation to queue: #{inspect(operation)} for #{resource["metadata"]["namespace"]}/#{resource["metadata"]["name"]} with priority #{priority}"
+    )
+
+    # Create a more concise representation of the queue for logging
+    queue_summary =
+      Enum.map(sorted_queue, fn {p, op, res} ->
+        "#{op} for #{res["metadata"]["namespace"]}/#{res["metadata"]["name"]} (priority: #{p})"
+      end)
+      |> Enum.join(", ")
+
+    Logger.debug("Current queue: #{queue_summary}")
 
     # Automatically start processing if not already processing
     new_state =
@@ -121,7 +131,20 @@ defmodule Drowzee.CoordinatorAgent do
   # Handle the process_queue message
   @impl true
   def handle_info(:process_queue, state) do
-    Logger.debug("CoordinatorAgent processing queue")
+    queue_length = length(state.queue)
+    Logger.debug("CoordinatorAgent processing queue - Items remaining: #{queue_length}")
+
+    # Log the current queue contents in a concise format
+    if queue_length > 0 do
+      queue_summary =
+        Enum.map(state.queue, fn {p, op, res} ->
+          "#{op} for #{res["metadata"]["namespace"]}/#{res["metadata"]["name"]} (priority: #{p})"
+        end)
+        |> Enum.join(", ")
+
+      Logger.debug("Queue contents: #{queue_summary}")
+    end
+
     # Process one item from the queue
     case process_next_operation(state) do
       {:ok, new_state} ->
@@ -154,23 +177,82 @@ defmodule Drowzee.CoordinatorAgent do
     {:ok, %{queue: [], processing: false}}
   end
 
-  defp process_next_operation(%{queue: [{_priority, operation, resource} | rest]}) do
+  defp process_next_operation(%{queue: [{priority, operation, resource} | rest]}) do
+    Logger.info(
+      "Processing operation: #{operation} for #{resource["metadata"]["namespace"]}/#{resource["metadata"]["name"]} (priority: #{priority})"
+    )
+
     try do
       # Call the appropriate function in SleepSchedule module
       result =
         case operation do
-          :scale_down_statefulsets -> Drowzee.K8s.SleepSchedule.scale_down_statefulsets(resource)
-          :scale_down_deployments -> Drowzee.K8s.SleepSchedule.scale_down_deployments(resource)
-          :suspend_cronjobs -> Drowzee.K8s.SleepSchedule.suspend_cronjobs(resource)
-          :scale_up_statefulsets -> Drowzee.K8s.SleepSchedule.scale_up_statefulsets(resource)
-          :scale_up_deployments -> Drowzee.K8s.SleepSchedule.scale_up_deployments(resource)
-          :resume_cronjobs -> Drowzee.K8s.SleepSchedule.resume_cronjobs(resource)
+          :scale_down_statefulsets ->
+            Logger.debug(
+              "Scaling down StatefulSets for #{resource["metadata"]["namespace"]}/#{resource["metadata"]["name"]}"
+            )
+
+            Drowzee.K8s.SleepSchedule.scale_down_statefulsets(resource)
+
+          :scale_down_deployments ->
+            Logger.debug(
+              "Scaling down Deployments for #{resource["metadata"]["namespace"]}/#{resource["metadata"]["name"]}"
+            )
+
+            Drowzee.K8s.SleepSchedule.scale_down_deployments(resource)
+
+          :suspend_cronjobs ->
+            Logger.debug(
+              "Suspending CronJobs for #{resource["metadata"]["namespace"]}/#{resource["metadata"]["name"]}"
+            )
+
+            Drowzee.K8s.SleepSchedule.suspend_cronjobs(resource)
+
+          :scale_up_statefulsets ->
+            Logger.debug(
+              "Scaling up StatefulSets for #{resource["metadata"]["namespace"]}/#{resource["metadata"]["name"]}"
+            )
+
+            Drowzee.K8s.SleepSchedule.scale_up_statefulsets(resource)
+
+          :scale_up_deployments ->
+            Logger.debug(
+              "Scaling up Deployments for #{resource["metadata"]["namespace"]}/#{resource["metadata"]["name"]}"
+            )
+
+            Drowzee.K8s.SleepSchedule.scale_up_deployments(resource)
+
+          :resume_cronjobs ->
+            Logger.debug(
+              "Resuming CronJobs for #{resource["metadata"]["namespace"]}/#{resource["metadata"]["name"]}"
+            )
+
+            Drowzee.K8s.SleepSchedule.resume_cronjobs(resource)
         end
 
       # Log the result - concise info, detailed debug
       Logger.info(
-        "Processed #{operation} for #{resource["metadata"]["name"]} in #{resource["metadata"]["namespace"]}: #{elem(result, 0)}"
+        "Completed #{operation} for #{resource["metadata"]["namespace"]}/#{resource["metadata"]["name"]}: #{elem(result, 0)}"
       )
+
+      # Log the next operations in the queue
+      rest_length = length(rest)
+
+      if rest_length > 0 do
+        next_summary =
+          Enum.take(rest, min(3, rest_length))
+          |> Enum.map(fn {p, op, res} ->
+            name = res["metadata"]["name"] || "unknown"
+            namespace = res["metadata"]["namespace"] || "unknown"
+            "#{op} for #{namespace}/#{name} (priority: #{p})"
+          end)
+          |> Enum.join(", ")
+
+        Logger.debug(
+          "Next in queue (showing up to 3): #{next_summary}#{if rest_length > 3, do: " and #{rest_length - 3} more", else: ""}"
+        )
+      else
+        Logger.debug("Queue will be empty after this operation")
+      end
 
       Logger.debug("Operation details: #{inspect(operation)}: #{inspect(result)}")
 
@@ -178,8 +260,40 @@ defmodule Drowzee.CoordinatorAgent do
       {:ok, %{queue: rest, processing: true}}
     rescue
       e ->
-        Logger.error("Error processing operation #{inspect(operation)}: #{inspect(e)}")
+        Logger.error(
+          "Error processing operation #{operation} for #{resource["metadata"]["namespace"]}/#{resource["metadata"]["name"]}: #{inspect(e)}"
+        )
+
+        Logger.error("Stack trace: #{Exception.format_stacktrace(__STACKTRACE__)}")
+
+        # Check if there are more operations in the queue
+        rest_length = length(rest)
+
+        if rest_length > 0 do
+          Logger.info("Still #{rest_length} operations in queue after error")
+        else
+          Logger.info("Queue will be empty after this error")
+        end
+
         {:error, e}
+    catch
+      kind, reason ->
+        Logger.error(
+          "Caught #{kind} while processing operation #{operation} for #{resource["metadata"]["namespace"]}/#{resource["metadata"]["name"]}: #{inspect(reason)}"
+        )
+
+        Logger.error("Stack trace: #{Exception.format_stacktrace(__STACKTRACE__)}")
+
+        # Check if there are more operations in the queue
+        rest_length = length(rest)
+
+        if rest_length > 0 do
+          Logger.info("Still #{rest_length} operations in queue after error")
+        else
+          Logger.info("Queue will be empty after this error")
+        end
+
+        {:error, reason}
     end
   end
 
