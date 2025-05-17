@@ -85,6 +85,12 @@ defmodule Drowzee.CoordinatorAgent do
   end
 
   @impl true
+  def handle_cast(:reset_processing, state) do
+    # Reset the processing flag
+    {:noreply, %{state | processing: false}}
+  end
+
+  @impl true
   def handle_cast({:add_operation, operation, resource, priority}, state = %{queue: queue}) do
     # Check if this operation already exists in the queue
     if operation_exists_in_queue?(queue, operation, resource) do
@@ -136,12 +142,6 @@ defmodule Drowzee.CoordinatorAgent do
         res["metadata"]["name"] == resource["metadata"]["name"] &&
         res["metadata"]["namespace"] == resource["metadata"]["namespace"]
     end)
-  end
-
-  @impl true
-  def handle_cast(:reset_processing, state) do
-    # Reset the processing flag
-    {:noreply, %{state | processing: false}}
   end
 
   # Handle the process_queue message
