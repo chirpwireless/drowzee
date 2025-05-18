@@ -102,10 +102,24 @@ defmodule Drowzee.Controller.SleepScheduleController do
 
     # For schedules with nil wake time, check if they're already sleeping
     # If they are, keep them asleep regardless of sleep time changes
-    manual_override_exists =
+    {manual_override_exists, manual_override_type} =
       case get_condition(axn, "ManualOverride") do
-        {:ok, condition} -> condition["status"] == "True"
-        _ -> false
+        {:ok, condition} ->
+          if condition["status"] == "True" do
+            override_type =
+              case condition["reason"] do
+                "WakeUp" -> "wake_up_override"
+                "Sleep" -> "sleep_override"
+                _ -> nil
+              end
+
+            {true, override_type}
+          else
+            {false, nil}
+          end
+
+        _ ->
+          {false, nil}
       end
 
     already_sleeping =
@@ -121,7 +135,14 @@ defmodule Drowzee.Controller.SleepScheduleController do
         already_sleeping and
         not manual_override_exists
 
-    case Drowzee.SleepChecker.naptime?(sleep_time, wake_time, timezone, day_of_week) do
+    # Pass the manual override to the SleepChecker
+    case Drowzee.SleepChecker.naptime?(
+           sleep_time,
+           wake_time,
+           timezone,
+           day_of_week,
+           manual_override_type
+         ) do
       # We've removed the :inactive_day return value from the sleep checker
       # Now it always returns true/false for naptime
       {:ok, naptime} ->
