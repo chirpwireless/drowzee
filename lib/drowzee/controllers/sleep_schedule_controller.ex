@@ -275,7 +275,9 @@ defmodule Drowzee.Controller.SleepScheduleController do
 
   # Add a scaling operation to the queue with priority
   defp queue_scaling_operation(operation, resource, priority) do
-    Logger.info("Queueing operation #{inspect(operation)} with priority #{priority}")
+    Logger.info(
+      "Queueing operation #{operation} for #{resource["metadata"]["namespace"]}/#{resource["metadata"]["name"]} with priority #{priority}"
+    )
 
     # Use GenServer.cast instead of Agent.update
     GenServer.cast(

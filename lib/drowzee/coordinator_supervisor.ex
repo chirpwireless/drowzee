@@ -47,7 +47,15 @@ defmodule Drowzee.CoordinatorAgent do
   @impl true
   def init(state) do
     Logger.info("Starting CoordinatorAgent")
+    # Start a periodic health check to detect and fix stuck queues
+    schedule_health_check()
     {:ok, state}
+  end
+
+  # Schedule a health check to run periodically
+  defp schedule_health_check do
+    # Check every 30 seconds
+    Process.send_after(self(), :health_check, 30_000)
   end
 
   @impl true
@@ -106,7 +114,7 @@ defmodule Drowzee.CoordinatorAgent do
       sorted_queue = Enum.sort(new_queue, fn {p1, _, _}, {p2, _, _} -> p1 <= p2 end)
 
       Logger.debug(
-        "Added operation to queue: #{inspect(operation)} for #{resource["metadata"]["namespace"]}/#{resource["metadata"]["name"]} with priority #{priority}"
+        "Added operation to queue: #{operation} for #{resource["metadata"]["namespace"]}/#{resource["metadata"]["name"]} with priority #{priority}"
       )
 
       # Create a concise representation of the queue for logging
@@ -177,6 +185,26 @@ defmodule Drowzee.CoordinatorAgent do
         # Reset processing state and try again later
         Process.send_after(self(), :process_queue, 1000)
         {:noreply, %{state | processing: false}}
+    end
+  end
+
+  # Handle health check message
+  @impl true
+  def handle_info(:health_check, state) do
+    # Schedule the next health check
+    schedule_health_check()
+
+    # Check if there are items in the queue but processing is stuck
+    if length(state.queue) > 0 and state.processing do
+      # Check how long the processing flag has been set
+      # For now, just log and reset the processing flag
+      Logger.warning("Queue processing appears to be stuck. Resetting processing flag.")
+
+      # Reset the processing flag and restart queue processing
+      Process.send_after(self(), :process_queue, 100)
+      {:noreply, %{state | processing: false}}
+    else
+      {:noreply, state}
     end
   end
 
@@ -270,7 +298,7 @@ defmodule Drowzee.CoordinatorAgent do
         Logger.debug("Queue will be empty after this operation")
       end
 
-      Logger.debug("Operation details: #{inspect(operation)}: #{inspect(result)}")
+      Logger.debug("Operation details: #{operation}: #{inspect(result)}")
 
       # Return the new state with the operation removed from the queue
       {:ok, %{queue: rest, processing: true}}
