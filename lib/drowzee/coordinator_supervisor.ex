@@ -298,7 +298,29 @@ defmodule Drowzee.CoordinatorAgent do
         Logger.debug("Queue will be empty after this operation")
       end
 
-      Logger.debug("Operation details: #{operation}: #{inspect(result)}")
+      # Log a simple summary of the operation result
+      case result do
+        {:ok, resource_results} ->
+          # Extract resource names for successful operations
+          resources = extract_resource_names(resource_results)
+          Logger.info("✅ #{operation} succeeded for all resources: #{resources}")
+          
+        {:partial, resource_results, errors} ->
+          # Extract successful and failed resource names
+          successes = extract_resource_names(resource_results)
+          failures = extract_error_resources(errors)
+          
+          if successes != "" do
+            Logger.info("✅ #{operation} succeeded for: #{successes}")
+          end
+          
+          if failures != "" do
+            Logger.warning("❌ #{operation} failed for: #{failures}")
+          end
+          
+        {:error, error} ->
+          Logger.error("❌ #{operation} failed completely: #{inspect(error)}")
+      end
 
       # Return the new state with the operation removed from the queue
       {:ok, %{queue: rest, processing: true}}
@@ -339,6 +361,36 @@ defmodule Drowzee.CoordinatorAgent do
 
         {:error, reason}
     end
+  end
+
+  # Helper function to extract resource names from successful results
+  defp extract_resource_names(resource_results) do
+    resource_results
+    |> Enum.map(fn
+      {:ok, res} ->
+        name = res["metadata"]["name"] || "unknown"
+        namespace = res["metadata"]["namespace"] || "unknown"
+        "#{namespace}/#{name}"
+      _ -> nil
+    end)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join(", ")
+  end
+
+  # Helper function to extract resource names from errors
+  defp extract_error_resources(errors) do
+    errors
+    |> Enum.map(fn
+      {:error, res, _error_msg} ->
+        name = res["metadata"]["name"] || "unknown"
+        namespace = res["metadata"]["namespace"] || "unknown"
+        "#{namespace}/#{name}"
+      %{"name" => name, "namespace" => namespace} ->
+        "#{namespace}/#{name}"
+      _ -> nil
+    end)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join(", ")
   end
 
   # Terminate callback for cleanup
