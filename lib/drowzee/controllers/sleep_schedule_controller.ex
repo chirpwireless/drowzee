@@ -325,7 +325,7 @@ defmodule Drowzee.Controller.SleepScheduleController do
   defp check_sleep_transition(axn, opts) do
     Logger.info("Checking sleep transition...")
 
-    case check_application_status(axn, &application_status_asleep?/1) do
+    case check_application_status(axn, &application_status_asleep?/3) do
       {:ok, true} ->
         Logger.debug("All applications are asleep")
 
@@ -350,7 +350,7 @@ defmodule Drowzee.Controller.SleepScheduleController do
   defp check_wake_up_transition(axn, opts) do
     Logger.info("Checking wake up transition...")
 
-    case check_application_status(axn, &application_status_ready?/1) do
+    case check_application_status(axn, &application_status_ready?/3) do
       {:ok, true} ->
         Logger.debug("All applications are ready")
 
@@ -372,32 +372,58 @@ defmodule Drowzee.Controller.SleepScheduleController do
     end
   end
 
-  defp application_status_ready?(status) do
-    replicas = Map.get(status, "replicas")
-    ready_replicas = Map.get(status, "readyReplicas")
+  defp application_status_ready?(metadata, spec, status) do
+    name = Map.get(metadata, "name")
+    namespace = Map.get(metadata, "namespace")
+
+    original_replicas = Map.get(metadata["annotations"] || %{}, "drowzee.io/original-replicas")
+    spec_replicas = Map.get(spec, "replicas")
     suspended = Map.get(status, "suspended", true)
 
-    cond do
-      not is_nil(replicas) and not is_nil(ready_replicas) ->
-        replicas == ready_replicas
+    Logger.debug(
+      "Ready check for #{namespace}/#{name} - spec_replicas: #{spec_replicas}, original_replicas: #{original_replicas}, suspended: #{suspended}"
+    )
 
+    cond do
+      # For newly added apps without original_replicas annotation
+      is_nil(original_replicas) and not is_nil(spec_replicas) ->
+        # Consider them always ready
+        true
+
+      # For apps with original_replicas annotation during scale up
+      not is_nil(original_replicas) and not is_nil(spec_replicas) ->
+        # Check if spec.replicas matches original_replicas
+        try do
+          spec_replicas == String.to_integer(original_replicas)
+        rescue
+          _ ->
+            Logger.error("Failed to convert original_replicas to integer: #{original_replicas}")
+            false
+        end
+
+      # For CronJobs: considered ready if not suspended
       true ->
-        # For CronJobs: considered ready if not suspended
         suspended == false
     end
   end
 
-  defp application_status_asleep?(status) do
-    replicas = Map.get(status, "replicas", 0)
-    ready = Map.get(status, "readyReplicas", 0)
+  defp application_status_asleep?(metadata, spec, status) do
+    name = Map.get(metadata, "name")
+    namespace = Map.get(metadata, "namespace")
+
+    spec_replicas = Map.get(spec, "replicas")
     suspended = Map.get(status, "suspended", nil)
+
+    Logger.debug(
+      "Asleep check for #{namespace}/#{name} - spec_replicas: #{spec_replicas}, suspended: #{suspended}"
+    )
 
     cond do
       not is_nil(suspended) ->
         suspended == true
 
       true ->
-        replicas == 0 and ready == 0
+        spec_replicas == 0
     end
   end
 
@@ -411,7 +437,11 @@ defmodule Drowzee.Controller.SleepScheduleController do
             "Deployment #{Deployment.name(deployment)} replicas: #{Deployment.replicas(deployment)}, readyReplicas: #{Deployment.ready_replicas(deployment)}"
           )
 
-          check_fn.(deployment["status"])
+          check_fn.(
+            deployment["metadata"],
+            deployment["spec"],
+            deployment["status"]
+          )
         end)
 
       statefulsets_result =
@@ -420,7 +450,11 @@ defmodule Drowzee.Controller.SleepScheduleController do
             "StatefulSet #{StatefulSet.name(statefulset)} replicas: #{StatefulSet.replicas(statefulset)}, readyReplicas: #{StatefulSet.ready_replicas(statefulset)}"
           )
 
-          check_fn.(statefulset["status"])
+          check_fn.(
+            statefulset["metadata"],
+            statefulset["spec"],
+            statefulset["status"]
+          )
         end)
 
       cronjobs_result =
@@ -430,7 +464,11 @@ defmodule Drowzee.Controller.SleepScheduleController do
           Logger.debug("CronJob #{CronJob.name(cronjob)} suspended: #{suspended}")
 
           # check_fn determines if suspended is the expected state (true for sleep, false for wake)
-          check_fn.(%{"suspended" => suspended})
+          check_fn.(
+            cronjob["metadata"],
+            cronjob["spec"],
+            %{"suspended" => suspended}
+          )
         end)
 
       # Determine which resources we need to check based on what's present
