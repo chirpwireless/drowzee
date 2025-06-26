@@ -13,13 +13,16 @@ defmodule Drowzee.SleepChecker do
     is_active_today = day_of_week_matches?(now, day_of_week)
     
     if not is_active_today do
-      # If today is not an active day for the schedule, skip the schedule
+      # If today is not an active day for the schedule, apps should be asleep
       dow_num = Date.day_of_week(today_date)
       dow_name = Timex.day_name(dow_num)
-      Logger.debug("Today (#{dow_num}/#{dow_name}) is not in day of week expression '#{day_of_week}', schedule will be skipped")
-      {:ok, :inactive_day} # Skip the schedule, maintain current state
+      Logger.debug("Today (#{dow_num}/#{dow_name}) is not in day of week expression '#{day_of_week}', apps should be asleep")
+      {:ok, true} # Return naptime=true for non-working days
     else
-      # On active days for the schedule, check if we've passed the sleep time
+      # Check the current state of the schedule from the resource status
+      # If the schedule is already sleeping, keep it asleep regardless of sleep time changes
+      # This can be determined by checking the resource status in the controller
+      # For now, we'll just check if we've passed the sleep time
       with {:ok, sleep_datetime} <- parse_time(sleep_time, today_date, timezone) do
         # Compare current time with sleep time
         result = DateTime.compare(now, sleep_datetime) in [:eq, :gt]
@@ -44,11 +47,12 @@ defmodule Drowzee.SleepChecker do
     is_active_today = day_of_week_matches?(now, day_of_week)
 
     if not is_active_today do
-      # If today is not an active day, do nothing (maintain current state)
+      # If today is not an active day, apps should be asleep (naptime=true)
       dow_num = Date.day_of_week(today_date)
       dow_name = Timex.day_name(dow_num)
-      Logger.debug("Today (#{dow_num}/#{dow_name}) is not in day of week expression '#{day_of_week}', maintaining current state")
-      {:ok, :inactive_day}
+      Logger.debug("Today (#{dow_num}/#{dow_name}) is not in day of week expression '#{day_of_week}', apps should be asleep")
+      # Return naptime=true for non-working days
+      {:ok, true}
     else
       with {:ok, sleep_datetime} <- parse_time(sleep_time, today_date, timezone),
            {:ok, wake_datetime} <- parse_time(wake_time, today_date, timezone) do

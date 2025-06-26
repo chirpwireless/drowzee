@@ -79,14 +79,32 @@ defmodule Drowzee.Controller.SleepScheduleController do
     if day_of_week != "*" do
       Logger.info("Schedule is active only on days matching: #{day_of_week}")
     end
-
+    
+    # For schedules with nil wake time, check if they're already sleeping
+    # If they are, keep them asleep regardless of sleep time changes
+    manual_override_exists = case get_condition(axn, "ManualOverride") do
+      {:ok, condition} -> condition["status"] == "True"
+      _ -> false
+    end
+    
+    already_sleeping = case get_condition(axn, "Sleeping") do
+      {:ok, condition} -> condition["status"] == "True"
+      _ -> false
+    end
+    
+    # If schedule has no wake time, is already sleeping, and has no manual override,
+    # keep it asleep regardless of sleep time changes
+    force_naptime = (is_nil(wake_time) or wake_time == "") and 
+                    already_sleeping and 
+                    not manual_override_exists
+    
     case Drowzee.SleepChecker.naptime?(sleep_time, wake_time, timezone, day_of_week) do
-      {:ok, :inactive_day} ->
-        # If today is not an active day, skip processing (maintain current state)
-        Logger.info("Today is not an active day for this schedule, skipping state changes")
-        axn
+      # We've removed the :inactive_day return value from the sleep checker
+      # Now it always returns true/false for naptime
       {:ok, naptime} ->
-        %{axn | assigns: Map.put(axn.assigns, :naptime, naptime)}
+        # Force naptime to true if conditions are met
+        final_naptime = naptime or force_naptime
+        %{axn | assigns: Map.put(axn.assigns, :naptime, final_naptime)}
       {:error, reason} ->
         Logger.error("Error checking naptime: #{reason}")
         set_condition(axn, "Error", true, "InvalidSleepSchedule", "Invalid sleep schedule: #{reason}")
@@ -112,9 +130,20 @@ defmodule Drowzee.Controller.SleepScheduleController do
         # Trigger action from manual override
         {:awake, :no_transition, :sleep_override, _} -> initiate_sleep(axn)
         {:sleeping, :no_transition, :wake_up_override, _} -> initiate_wake_up(axn)
-        # Clear manual overrides once they're no longer needed
-        {:awake, :no_transition, :wake_up_override, :not_naptime} -> axn |> clear_manual_override()
-        {:sleeping, :no_transition, :sleep_override, :naptime} -> axn |> clear_manual_override()
+        # Preserve all manual overrides until explicitly removed
+        {:awake, :no_transition, :wake_up_override, :not_naptime} -> 
+          Logger.debug("Preserving manual wake-up override")
+          axn
+        # When a schedule is awake with a wake-up override and it's past sleep time,
+        # we respect the manual override and do nothing
+        {:awake, :no_transition, :wake_up_override, :naptime} ->
+          Logger.info("Sleep time reached but respecting manual wake-up override")
+          axn
+        # When a schedule is sleeping with a sleep override and it's naptime,
+        # we respect the manual override and do nothing
+        {:sleeping, :no_transition, :sleep_override, :naptime} -> 
+          Logger.debug("Sleep time reached but respecting manual sleep override")
+          axn
         # Trigger scheduled actions
         {:awake, :no_transition, :no_override, :naptime} -> initiate_sleep(axn)
         {:sleeping, :no_transition, :no_override, :not_naptime} -> initiate_wake_up(axn)
@@ -128,6 +157,12 @@ defmodule Drowzee.Controller.SleepScheduleController do
     else
       {:error, _error} -> axn # Conditions should be present except for the first event
     end
+  end
+
+  # Helper function to check if a schedule has a wake time defined
+  defp has_wake_time?(resource) do
+    wake_time = resource["spec"]["wakeTime"]
+    not (is_nil(wake_time) or wake_time == "")
   end
 
   defp clear_manual_override(axn) do
@@ -157,17 +192,102 @@ defmodule Drowzee.Controller.SleepScheduleController do
     axn
   end
 
+  # Coordination mechanism for scaling operations with prioritization
+  # Uses an Agent to coordinate scaling operations across multiple schedules
+  
+  # Start the coordinator when the application starts
+  def start_coordinator do
+    Agent.start_link(fn -> %{queue: [], processing: false} end, name: __MODULE__.Coordinator)
+  end
+  
+  # Add a scaling operation to the queue with priority
+  defp queue_scaling_operation(operation, resource, priority) do
+    Agent.update(__MODULE__.Coordinator, fn state = %{queue: queue} ->
+      # Add operation to queue with priority (lower number = higher priority)
+      new_queue = queue ++ [{priority, operation, resource}]
+      # Sort by priority
+      sorted_queue = Enum.sort(new_queue, fn {p1, _, _}, {p2, _, _} -> p1 <= p2 end)
+      %{state | queue: sorted_queue}
+    end)
+    
+    # Start processing if not already running
+    spawn(fn -> process_queue() end)
+  end
+  
+  # Process the queue of scaling operations
+  defp process_queue do
+    # Try to acquire the processing lock
+    Agent.get_and_update(__MODULE__.Coordinator, fn
+      %{processing: true} = state ->
+        # Already processing, do nothing
+        {false, state}
+      %{processing: false, queue: []} = state ->
+        # Nothing to process
+        {false, state}
+      %{processing: false, queue: queue} = state ->
+        # Start processing
+        {true, %{state | processing: true}}
+    end)
+    |> case do
+      false -> :ok  # Already processing or nothing to do
+      true -> do_process_queue()
+    end
+  end
+  
+  # Process the queue items one by one
+  defp do_process_queue do
+    Agent.get_and_update(__MODULE__.Coordinator, fn
+      %{queue: []} = state ->
+        # Queue is empty, stop processing
+        {:done, %{state | processing: false}}
+      %{queue: [{_priority, operation, resource} | rest]} = state ->
+        # Get the next operation and update the queue
+        {{operation, resource}, %{state | queue: rest}}
+    end)
+    |> case do
+      :done -> :ok
+      {operation, resource} ->
+        # Execute the operation
+        try do
+          apply_scaling_operation(operation, resource)
+          # Small delay to avoid overwhelming the Kubernetes API
+          Process.sleep(200)
+        rescue
+          e ->
+            Logger.error("Error executing scaling operation: #{inspect(operation)}, #{inspect(e)}")
+        end
+        # Process the next item
+        do_process_queue()
+    end
+  end
+  
+  # Apply the actual scaling operation
+  defp apply_scaling_operation(operation, resource) do
+    case operation do
+      :scale_down_statefulsets -> SleepSchedule.scale_down_statefulsets(resource)
+      :scale_down_deployments -> SleepSchedule.scale_down_deployments(resource)
+      :suspend_cronjobs -> SleepSchedule.suspend_cronjobs(resource)
+      :scale_up_statefulsets -> SleepSchedule.scale_up_statefulsets(resource)
+      :scale_up_deployments -> SleepSchedule.scale_up_deployments(resource)
+      :resume_cronjobs -> SleepSchedule.resume_cronjobs(resource)
+    end
+  end
+
+  # Prioritized scaling down: StatefulSets (1) -> Deployments (2) -> CronJobs (3)
   defp scale_down_applications(axn) do
-    SleepSchedule.scale_down_deployments(axn.resource)
-    SleepSchedule.scale_down_statefulsets(axn.resource)
-    SleepSchedule.suspend_cronjobs(axn.resource)
+    # Queue operations with priority (lower number = higher priority)
+    queue_scaling_operation(:scale_down_statefulsets, axn.resource, 1)
+    queue_scaling_operation(:scale_down_deployments, axn.resource, 2)
+    queue_scaling_operation(:suspend_cronjobs, axn.resource, 3)
     axn
   end
 
+  # Prioritized scaling up: StatefulSets (1) -> Deployments (2) -> CronJobs (3)
   defp scale_up_applications(axn) do
-    SleepSchedule.scale_up_deployments(axn.resource)
-    SleepSchedule.scale_up_statefulsets(axn.resource)
-    SleepSchedule.resume_cronjobs(axn.resource)
+    # Queue operations with priority (lower number = higher priority)
+    queue_scaling_operation(:scale_up_statefulsets, axn.resource, 1)
+    queue_scaling_operation(:scale_up_deployments, axn.resource, 2)
+    queue_scaling_operation(:resume_cronjobs, axn.resource, 3)
     axn
   end
 

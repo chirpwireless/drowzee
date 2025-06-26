@@ -7,6 +7,9 @@ defmodule Drowzee.Application do
 
   @impl true
   def start(_type, _args) do
+    # Initialize the scaling coordinator
+    Drowzee.Controller.SleepScheduleController.start_coordinator()
+    
     children = [
       DrowzeeWeb.Telemetry,
       {DNSCluster, query: Application.get_env(:drowzee, :dns_cluster_query) || :ignore},
