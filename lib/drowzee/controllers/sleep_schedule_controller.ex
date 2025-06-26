@@ -411,18 +411,38 @@ defmodule Drowzee.Controller.SleepScheduleController do
               "Failed to scale resources: #{resource_names}. Processing continued."
 
             true ->
-              failed_names =
-                failed_resources
-                |> Enum.map(fn {res, _} -> res["metadata"]["name"] end)
-                |> Enum.join(", ")
+              # Build error message parts
+              parts = []
 
-              missing_names =
-                Enum.map(missing_resources, fn res ->
-                  "#{res["kind"]} #{res["name"]}"
-                end)
-                |> Enum.join(", ")
+              # Add failed resources if any
+              parts =
+                if not Enum.empty?(failed_resources) do
+                  failed_names =
+                    failed_resources
+                    |> Enum.map(fn {res, _} -> res["metadata"]["name"] end)
+                    |> Enum.join(", ")
 
-              "Failed to scale: #{failed_names}. Resources not found: #{missing_names}. Processing continued."
+                  parts ++ ["Failed to scale resources: #{failed_names}"]
+                else
+                  parts
+                end
+
+              # Add missing resources if any
+              parts =
+                if not Enum.empty?(missing_resources) do
+                  missing_names =
+                    Enum.map(missing_resources, fn res ->
+                      "#{res["kind"]} #{res["name"]}"
+                    end)
+                    |> Enum.join(", ")
+
+                  parts ++ ["Resources not found: #{missing_names}"]
+                else
+                  parts
+                end
+
+              # Join all parts and add final message
+              Enum.join(parts, ". ") <> ". Processing continued."
           end
 
         # Update the resource with error condition
@@ -477,14 +497,23 @@ defmodule Drowzee.Controller.SleepScheduleController do
 
   # Categorize errors into scaling failures and missing resources
   defp categorize_errors(errors) do
-    Enum.split_with(errors, fn
-      # Scaling failures
-      {:error, _, _} -> true
-      # Missing resources
-      %{"status" => "NotFound"} -> false
-      # Default to scaling failures for any other format
-      _ -> true
-    end)
+    # Separate scaling failures from missing resources
+    {scaling_errors, missing_resources} =
+      Enum.split_with(errors, fn
+        # Scaling failures
+        {:error, _, _} ->
+          true
+
+        # Missing resources
+        %{"status" => "NotFound"} ->
+          false
+
+        # Default to scaling failures for any other format
+        _ ->
+          true
+      end)
+
+    {scaling_errors, missing_resources}
   end
 
   # Update the resource status in the Kubernetes API

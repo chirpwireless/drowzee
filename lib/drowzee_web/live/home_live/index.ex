@@ -284,55 +284,85 @@ defmodule DrowzeeWeb.HomeLive.Index do
   end
 
   defp load_sleep_schedules(socket) do
-    # Get all sleep schedules for the current namespace or specific schedule
+    # Fetch sleep schedules based on the current view
     {sleep_schedules, deployments_by_name, statefulsets_by_name, cronjobs_by_name,
-     missing_resources} =
-      case socket.assigns.name do
-        nil ->
-          # When no specific name is provided, get all schedules for the namespace
-          schedules = Drowzee.K8s.sleep_schedules(socket.assigns.namespace)
-          {schedules, %{}, %{}, %{}, []}
+     missing_resources,
+     resolved_wildcard_names} =
+      case {socket.assigns.namespace, socket.assigns.name} do
+        # Main page: fetch all sleep schedules
+        {nil, nil} ->
+          {Drowzee.K8s.sleep_schedules(:all), %{}, %{}, %{}, [], %{}}
 
-        name ->
-          # When a specific name is provided, fetch only that schedule directly
-          # This is much more efficient than fetching all schedules and filtering
+        # Namespace page: fetch schedules for the namespace
+        {namespace, nil} ->
+          {Drowzee.K8s.sleep_schedules(namespace), %{}, %{}, %{}, [], %{}}
+
+        # Schedule page: fetch a specific schedule and its resources
+        {namespace, name} ->
+          # Fetch the specific schedule
           schedules =
-            case Drowzee.K8s.get_sleep_schedule(name, socket.assigns.namespace) do
+            case Drowzee.K8s.get_sleep_schedule(name, namespace) do
               {:ok, schedule} -> [schedule]
               {:error, _} -> []
             end
 
           # Only fetch resources if we have a specific schedule
-          # This avoids unnecessary API calls
           {deployments, statefulsets, cronjobs, missing_resources} =
             case schedules do
               [schedule] ->
                 try do
-                  # Check for missing resources annotation
-                  missing_resources = get_missing_resources(schedule)
+                  # Get missing resources
+                  missing = get_missing_resources(schedule)
 
-                  # Get available resources
-                  {
-                    Drowzee.K8s.get_deployments_for_schedule(schedule),
-                    Drowzee.K8s.get_statefulsets_for_schedule(schedule),
-                    Drowzee.K8s.get_cronjobs_for_schedule(schedule),
-                    missing_resources
-                  }
+                  # Get deployments, statefulsets and cronjobs
+                  deps = Drowzee.K8s.get_deployments_for_schedule(schedule)
+                  sts = Drowzee.K8s.get_statefulsets_for_schedule(schedule)
+                  cjs = Drowzee.K8s.get_cronjobs_for_schedule(schedule)
+
+                  # Return all resources
+                  {deps, sts, cjs, missing}
                 rescue
-                  _ -> {[], [], [], []}
+                  e ->
+                    # Log the error and continue with empty values
+                    Logger.error("Error fetching resources for sleep schedule: #{inspect(e)}")
+                    {[], [], [], []}
                 end
 
               _ ->
+                # No schedules found
                 {[], [], [], []}
             end
 
-          {
-            schedules,
-            Map.new(deployments, &{&1["metadata"]["name"], &1}),
-            Map.new(statefulsets, &{&1["metadata"]["name"], &1}),
-            Map.new(cronjobs, &{&1["metadata"]["name"], &1}),
-            missing_resources
-          }
+          # Create maps for each resource type
+          deps_by_name = Map.new(deployments, &{&1["metadata"]["name"], &1})
+          sts_by_name = Map.new(statefulsets, &{&1["metadata"]["name"], &1})
+
+          # Create a map of CronJob names to CronJobs
+          cjs_by_name = Map.new(cronjobs, &{&1["metadata"]["name"], &1})
+
+          # Extract resolved wildcard names from schedules
+          resolved_wildcard_names =
+            case schedules do
+              [schedule] ->
+                annotations = get_in(schedule, ["metadata", "annotations"]) || %{}
+                resolved_names_json = Map.get(annotations, "drowzee.io/resolved-wildcard-names")
+
+                if resolved_names_json do
+                  case Jason.decode(resolved_names_json) do
+                    {:ok, resolved_names} -> resolved_names
+                    _ -> %{}
+                  end
+                else
+                  %{}
+                end
+
+              _ ->
+                %{}
+            end
+
+          # Return the schedules and resource maps
+          {schedules, deps_by_name, sts_by_name, cjs_by_name, missing_resources,
+           resolved_wildcard_names}
       end
 
     # Handle namespace statuses based on the current view
@@ -370,6 +400,8 @@ defmodule DrowzeeWeb.HomeLive.Index do
     |> assign(:statefulsets_by_name, statefulsets_by_name)
     |> assign(:cronjobs_by_name, cronjobs_by_name)
     |> assign(:missing_resources, missing_resources)
+    |> assign(:resolved_wildcard_names, resolved_wildcard_names)
+    |> assign(:loading, false)
     |> filter_sleep_schedules(socket.assigns.search)
   end
 
