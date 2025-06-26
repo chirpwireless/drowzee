@@ -1,0 +1,24 @@
+apiVersion: v1
+entries:
+  drowzee:
+  - apiVersion: v2
+    appVersion: 2025.626.95835-995dcdf
+    created: "2025-06-26T10:00:50.987520616Z"
+    description: A Helm chart for the Drowzee operator
+    digest: 2e3f13612396b5606f7d86504954fd008d85495cbf7ff28fa8d2cb52bf1babdc
+    name: drowzee
+    type: application
+    urls:
+    - https://chirpwireless.github.io/drowzee/drowzee-1.0.0.tgz
+    version: 1.0.0
+  - apiVersion: v2
+    appVersion: 2025.626.94817-a63fb14
+    created: "2025-06-26T10:00:50.987003559Z"
+    description: A Helm chart for the Drowzee operator
+    digest: f2d0f1112d2fc11a920d81c72e80079b111f84b030ae7559c38d5e75e1f31dee
+    name: drowzee
+    type: application
+    urls:
+    - https://chirpwireless.github.io/drowzee/drowzee-0.2.0.tgz
+    version: 0.2.0
+generated: "2025-06-26T10:00:50.986409889Z"
