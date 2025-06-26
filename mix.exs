@@ -57,7 +57,8 @@ defmodule Drowzee.MixProject do
       {:dns_cluster, "~> 0.1.1"},
       {:bandit, "~> 1.5"},
       {:bonny, "~> 1.0"},
-      {:timex, "~> 3.7"}
+      {:timex, "~> 3.7"},
+      {:crontab, "~> 1.1"}
     ]
   end
 

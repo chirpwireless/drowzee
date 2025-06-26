@@ -99,12 +99,20 @@ spec:
                 wakeTime:
                   type: string
                   description: "The time that the deployment will wake up (format: HH:MMam/pm)"
+                dayOfWeek:
+                  type: string
+                  description: "Cron-like expression for days of the week when the schedule is active (0-6 or SUN-SAT). Examples: '1-5' for weekdays, '0,6' for weekends, '*' for all days (default)."
+                  default: "*"
       storage: true
       additionalPrinterColumns:
         - name: Enabled
-          type: boolean
+          type: string
           description: Enabled
           jsonPath: .spec.enabled
+        - name: DayOfWeek
+          type: string
+          description: Active Days
+          jsonPath: .spec.dayOfWeek
         - name: SleepTime
           type: string
           description: Starts Sleeping
@@ -142,7 +150,6 @@ spec:
           description: Status overridden by user
           jsonPath: .status.conditions[?(@.type == "ManualOverride")].status
       served: true
-      deprecationWarning:
 metadata:
   name: sleepschedules.drowzee.challengr.io
   labels:
