@@ -102,10 +102,24 @@ defmodule Drowzee.Controller.SleepScheduleController do
 
     # For schedules with nil wake time, check if they're already sleeping
     # If they are, keep them asleep regardless of sleep time changes
-    manual_override_exists =
+    {manual_override_exists, manual_override_type} =
       case get_condition(axn, "ManualOverride") do
-        {:ok, condition} -> condition["status"] == "True"
-        _ -> false
+        {:ok, condition} ->
+          if condition["status"] == "True" do
+            override_type =
+              case condition["reason"] do
+                "WakeUp" -> "wake_up_override"
+                "Sleep" -> "sleep_override"
+                _ -> nil
+              end
+
+            {true, override_type}
+          else
+            {false, nil}
+          end
+
+        _ ->
+          {false, nil}
       end
 
     already_sleeping =
@@ -121,7 +135,14 @@ defmodule Drowzee.Controller.SleepScheduleController do
         already_sleeping and
         not manual_override_exists
 
-    case Drowzee.SleepChecker.naptime?(sleep_time, wake_time, timezone, day_of_week) do
+    # Pass the manual override to the SleepChecker
+    case Drowzee.SleepChecker.naptime?(
+           sleep_time,
+           wake_time,
+           timezone,
+           day_of_week,
+           manual_override_type
+         ) do
       # We've removed the :inactive_day return value from the sleep checker
       # Now it always returns true/false for naptime
       {:ok, naptime} ->
@@ -245,357 +266,24 @@ defmodule Drowzee.Controller.SleepScheduleController do
   # Coordination mechanism for scaling operations with prioritization
   # Uses an Agent to coordinate scaling operations across multiple schedules
 
-  # Start the coordinator when the application starts
+  # Start the coordinator when the application starts - this is now handled by CoordinatorSupervisor
   def start_coordinator do
-    Agent.start_link(fn -> %{queue: [], processing: false} end, name: __MODULE__.Coordinator)
+    # This is kept for backwards compatibility but is now a no-op
+    # The actual coordinator is started by the CoordinatorSupervisor
+    :ok
   end
 
   # Add a scaling operation to the queue with priority
   defp queue_scaling_operation(operation, resource, priority) do
-    Agent.update(__MODULE__.Coordinator, fn state = %{queue: queue} ->
-      # Add operation to queue with priority (lower number = higher priority)
-      new_queue = queue ++ [{priority, operation, resource}]
-      # Sort by priority
-      sorted_queue = Enum.sort(new_queue, fn {p1, _, _}, {p2, _, _} -> p1 <= p2 end)
-      %{state | queue: sorted_queue}
-    end)
-
-    # Start processing if not already running
-    spawn(fn -> process_queue() end)
-  end
-
-  # Process the queue of scaling operations
-  defp process_queue do
-    # Try to acquire the processing lock
-    Agent.get_and_update(__MODULE__.Coordinator, fn
-      %{processing: true} = state ->
-        # Already processing, do nothing
-        {false, state}
-
-      %{processing: false, queue: []} = state ->
-        # Nothing to process
-        {false, state}
-
-      %{processing: false, queue: _} = state ->
-        # Start processing
-        {true, %{state | processing: true}}
-    end)
-    |> case do
-      # Already processing or nothing to do
-      false -> :ok
-      true -> do_process_queue()
-    end
-  end
-
-  # Process the queue items one by one
-  defp do_process_queue do
-    Agent.get_and_update(__MODULE__.Coordinator, fn
-      %{queue: []} = state ->
-        # Queue is empty, stop processing
-        {:done, %{state | processing: false}}
-
-      %{queue: [{_priority, operation, resource} | rest]} = state ->
-        # Get the next operation and update the queue
-        {{operation, resource}, %{state | queue: rest}}
-    end)
-    |> case do
-      :done ->
-        :ok
-
-      {operation, resource} ->
-        # Execute the operation
-        try do
-          result = apply_scaling_operation(operation, resource)
-
-          # Handle the result based on its type
-          case result do
-            {:ok, _results} ->
-              # Operation succeeded, continue normally
-              :ok
-
-            {:partial, _results, _errors, updated_resource} ->
-              # Some operations failed but we continue
-              # Update the resource in the K8s API with the error condition
-              update_resource_status(updated_resource)
-
-            {:error, _error, updated_resource} ->
-              # Operation failed completely but we continue
-              # Update the resource in the K8s API with the error condition
-              update_resource_status(updated_resource)
-          end
-
-          # Small delay to avoid overwhelming the Kubernetes API
-          Process.sleep(200)
-        rescue
-          e ->
-            Logger.error(
-              "Error executing scaling operation: #{inspect(operation)}, #{inspect(e)}"
-            )
-        end
-
-        # Process the next item regardless of success/failure
-        do_process_queue()
-    end
-  end
-
-  # Apply the actual scaling operation
-  defp apply_scaling_operation(operation, resource) do
-    result =
-      case operation do
-        :scale_down_statefulsets -> SleepSchedule.scale_down_statefulsets(resource)
-        :scale_down_deployments -> SleepSchedule.scale_down_deployments(resource)
-        :suspend_cronjobs -> SleepSchedule.suspend_cronjobs(resource)
-        :scale_up_statefulsets -> SleepSchedule.scale_up_statefulsets(resource)
-        :scale_up_deployments -> SleepSchedule.scale_up_deployments(resource)
-        :resume_cronjobs -> SleepSchedule.resume_cronjobs(resource)
-      end
-
-    # Handle different result types
-    case result do
-      {:ok, results} ->
-        # All operations succeeded
-        {:ok, results}
-
-      {:partial, results, errors} ->
-        # Some operations failed or resources were missing
-        # Categorize errors into scaling failures and missing resources
-        {scaling_errors, missing_resources} = categorize_errors(errors)
-
-        # Log the errors and update failed resources in Kubernetes
-        failed_resources =
-          Enum.map(scaling_errors, fn
-            {:error, failed_resource, error_msg} ->
-              Logger.error("Scaling operation partially failed: #{error_msg}")
-              # Update the failed resource in Kubernetes to mark it as failed
-              update_failed_resource(failed_resource)
-              {failed_resource, error_msg}
-
-            {:error, error_msg} ->
-              Logger.error("Scaling operation partially failed: #{error_msg}")
-              nil
-          end)
-          |> Enum.reject(&is_nil/1)
-
-        # Log missing resources
-        unless Enum.empty?(missing_resources) do
-          missing_names =
-            Enum.map(missing_resources, fn res ->
-              "#{res["kind"]} #{res["name"]}"
-            end)
-            |> Enum.join(", ")
-
-          Logger.warning("Resources not found: #{missing_names}")
-        end
-
-        # Set error condition on the sleep schedule but continue processing
-        error_details =
-          cond do
-            Enum.empty?(failed_resources) and Enum.empty?(missing_resources) ->
-              "Some resources failed to scale, but processing continued. Check logs for details."
-
-            Enum.empty?(failed_resources) and not Enum.empty?(missing_resources) ->
-              missing_names =
-                Enum.map(missing_resources, fn res ->
-                  "#{res["kind"]} #{res["name"]}"
-                end)
-                |> Enum.join(", ")
-
-              "Resources not found: #{missing_names}. Processing continued."
-
-            not Enum.empty?(failed_resources) and Enum.empty?(missing_resources) ->
-              resource_names =
-                failed_resources
-                |> Enum.map(fn {res, _} -> res["metadata"]["name"] end)
-                |> Enum.join(", ")
-
-              "Failed to scale resources: #{resource_names}. Processing continued."
-
-            true ->
-              # Build error message parts
-              parts = []
-
-              # Add failed resources if any
-              parts =
-                if not Enum.empty?(failed_resources) do
-                  failed_names =
-                    failed_resources
-                    |> Enum.map(fn {res, _} -> res["metadata"]["name"] end)
-                    |> Enum.join(", ")
-
-                  parts ++ ["Failed to scale resources: #{failed_names}"]
-                else
-                  parts
-                end
-
-              # Add missing resources if any
-              parts =
-                if not Enum.empty?(missing_resources) do
-                  missing_names =
-                    Enum.map(missing_resources, fn res ->
-                      "#{res["kind"]} #{res["name"]}"
-                    end)
-                    |> Enum.join(", ")
-
-                  parts ++ ["Resources not found: #{missing_names}"]
-                else
-                  parts
-                end
-
-              # Join all parts and add final message
-              Enum.join(parts, ". ") <> ". Processing continued."
-          end
-
-        # Update the resource with error condition
-        updated_resource =
-          resource
-          |> put_in(
-            ["status", "conditions"],
-            (resource["status"]["conditions"] || [])
-            |> Enum.reject(fn condition -> condition["type"] == "Error" end)
-            |> Enum.concat([
-              %{
-                "type" => "Error",
-                "status" => "True",
-                "reason" => "ScalingPartialFailure",
-                "message" => error_details,
-                "lastTransitionTime" => DateTime.utc_now() |> DateTime.to_iso8601()
-              }
-            ])
-          )
-
-        # Add annotation for missing resources if any
-        updated_resource = add_missing_resources_annotation(updated_resource, missing_resources)
-
-        {:partial, results, errors, updated_resource}
-
-      {:error, error} ->
-        # Complete failure
-        error_details = "Scaling failed: #{inspect(error)}"
-        Logger.error(error_details)
-
-        # Update the resource with error condition
-        updated_resource =
-          resource
-          |> put_in(
-            ["status", "conditions"],
-            (resource["status"]["conditions"] || [])
-            |> Enum.reject(fn condition -> condition["type"] == "Error" end)
-            |> Enum.concat([
-              %{
-                "type" => "Error",
-                "status" => "True",
-                "reason" => "ScalingFailed",
-                "message" => error_details,
-                "lastTransitionTime" => DateTime.utc_now() |> DateTime.to_iso8601()
-              }
-            ])
-          )
-
-        {:error, error, updated_resource}
-    end
-  end
-
-  # Categorize errors into scaling failures and missing resources
-  defp categorize_errors(errors) do
-    # Separate scaling failures from missing resources
-    {scaling_errors, missing_resources} =
-      Enum.split_with(errors, fn
-        # Scaling failures
-        {:error, _, _} ->
-          true
-
-        # Missing resources
-        %{"status" => "NotFound"} ->
-          false
-
-        # Default to scaling failures for any other format
-        _ ->
-          true
-      end)
-
-    {scaling_errors, missing_resources}
-  end
-
-  # Update the resource status in the Kubernetes API
-  defp update_resource_status(resource) do
-    case K8s.Client.update(resource) do
-      {:ok, updated_resource} ->
-        Logger.debug("Updated resource status in Kubernetes API")
-        {:ok, updated_resource}
-
-      {:error, error} ->
-        Logger.error("Failed to update resource status in Kubernetes API: #{inspect(error)}")
-        {:error, error}
-    end
-  end
-
-  # Add annotation for missing resources to the sleep schedule
-  defp add_missing_resources_annotation(resource, []), do: resource
-
-  defp add_missing_resources_annotation(resource, missing_resources) do
-    missing_json = Jason.encode!(missing_resources)
-
-    resource =
-      update_in(
-        resource,
-        ["metadata", "annotations"],
-        fn annotations ->
-          annotations = annotations || %{}
-          Map.put(annotations, "drowzee.io/missing-resources", missing_json)
-        end
-      )
-
-    # Update the resource in Kubernetes
-    case K8s.Client.update(resource) do
-      {:ok, updated_resource} -> updated_resource
-      # Return original if update fails
-      {:error, _} -> resource
-    end
-  end
-
-  # Update a failed resource in Kubernetes to mark it as failed
-  defp update_failed_resource(resource) do
-    kind = resource["kind"]
-    name = resource["metadata"]["name"]
-    namespace = resource["metadata"]["namespace"]
-
-    Logger.info("Updating failed resource in Kubernetes",
-      kind: kind,
-      name: name,
-      namespace: namespace
+    Logger.info(
+      "Queueing operation #{operation} for #{resource["metadata"]["namespace"]}/#{resource["metadata"]["name"]} with priority #{priority}"
     )
 
-    # Create an update operation for the resource
-    operation = K8s.Client.update(resource)
-
-    # Execute the update
-    case K8s.Client.run(Drowzee.K8s.conn(), operation) do
-      {:ok, updated} ->
-        Logger.info("Successfully marked resource as failed",
-          kind: kind,
-          name: name,
-          namespace: namespace
-        )
-
-        {:ok, updated}
-
-      {:error, reason} ->
-        Logger.error("Failed to update resource with failure status: #{inspect(reason)}",
-          kind: kind,
-          name: name,
-          namespace: namespace
-        )
-
-        {:error, reason}
-    end
-  rescue
-    e ->
-      Logger.error("Error updating failed resource: #{inspect(e)}",
-        kind: resource["kind"] || "unknown",
-        name: resource["metadata"]["name"] || "unknown"
-      )
-
-      {:error, e}
+    # Use GenServer.cast instead of Agent.update
+    GenServer.cast(
+      __MODULE__.Coordinator,
+      {:add_operation, operation, resource, priority}
+    )
   end
 
   # Prioritized scaling down: StatefulSets (1) -> Deployments (2) -> CronJobs (3)
@@ -637,7 +325,7 @@ defmodule Drowzee.Controller.SleepScheduleController do
   defp check_sleep_transition(axn, opts) do
     Logger.info("Checking sleep transition...")
 
-    case check_application_status(axn, &application_status_asleep?/1) do
+    case check_application_status(axn, &application_status_asleep?/3) do
       {:ok, true} ->
         Logger.debug("All applications are asleep")
 
@@ -662,7 +350,7 @@ defmodule Drowzee.Controller.SleepScheduleController do
   defp check_wake_up_transition(axn, opts) do
     Logger.info("Checking wake up transition...")
 
-    case check_application_status(axn, &application_status_ready?/1) do
+    case check_application_status(axn, &application_status_ready?/3) do
       {:ok, true} ->
         Logger.debug("All applications are ready")
 
@@ -684,32 +372,58 @@ defmodule Drowzee.Controller.SleepScheduleController do
     end
   end
 
-  defp application_status_ready?(status) do
-    replicas = Map.get(status, "replicas")
-    ready_replicas = Map.get(status, "readyReplicas")
+  defp application_status_ready?(metadata, spec, status) do
+    name = Map.get(metadata, "name")
+    namespace = Map.get(metadata, "namespace")
+
+    original_replicas = Map.get(metadata["annotations"] || %{}, "drowzee.io/original-replicas")
+    spec_replicas = Map.get(spec, "replicas")
     suspended = Map.get(status, "suspended", true)
 
-    cond do
-      not is_nil(replicas) and not is_nil(ready_replicas) ->
-        replicas == ready_replicas
+    Logger.debug(
+      "Ready check for #{namespace}/#{name} - spec_replicas: #{spec_replicas}, original_replicas: #{original_replicas}, suspended: #{suspended}"
+    )
 
+    cond do
+      # For newly added apps without original_replicas annotation
+      is_nil(original_replicas) and not is_nil(spec_replicas) ->
+        # Consider them always ready
+        true
+
+      # For apps with original_replicas annotation during scale up
+      not is_nil(original_replicas) and not is_nil(spec_replicas) ->
+        # Check if spec.replicas matches original_replicas
+        try do
+          spec_replicas == String.to_integer(original_replicas)
+        rescue
+          _ ->
+            Logger.error("Failed to convert original_replicas to integer: #{original_replicas}")
+            false
+        end
+
+      # For CronJobs: considered ready if not suspended
       true ->
-        # For CronJobs: considered ready if not suspended
         suspended == false
     end
   end
 
-  defp application_status_asleep?(status) do
-    replicas = Map.get(status, "replicas", 0)
-    ready = Map.get(status, "readyReplicas", 0)
+  defp application_status_asleep?(metadata, spec, status) do
+    name = Map.get(metadata, "name")
+    namespace = Map.get(metadata, "namespace")
+
+    spec_replicas = Map.get(spec, "replicas")
     suspended = Map.get(status, "suspended", nil)
+
+    Logger.debug(
+      "Asleep check for #{namespace}/#{name} - spec_replicas: #{spec_replicas}, suspended: #{suspended}"
+    )
 
     cond do
       not is_nil(suspended) ->
         suspended == true
 
       true ->
-        replicas == 0 and ready == 0
+        spec_replicas == 0
     end
   end
 
@@ -723,7 +437,11 @@ defmodule Drowzee.Controller.SleepScheduleController do
             "Deployment #{Deployment.name(deployment)} replicas: #{Deployment.replicas(deployment)}, readyReplicas: #{Deployment.ready_replicas(deployment)}"
           )
 
-          check_fn.(deployment["status"])
+          check_fn.(
+            deployment["metadata"],
+            deployment["spec"],
+            deployment["status"]
+          )
         end)
 
       statefulsets_result =
@@ -732,7 +450,11 @@ defmodule Drowzee.Controller.SleepScheduleController do
             "StatefulSet #{StatefulSet.name(statefulset)} replicas: #{StatefulSet.replicas(statefulset)}, readyReplicas: #{StatefulSet.ready_replicas(statefulset)}"
           )
 
-          check_fn.(statefulset["status"])
+          check_fn.(
+            statefulset["metadata"],
+            statefulset["spec"],
+            statefulset["status"]
+          )
         end)
 
       cronjobs_result =
@@ -742,7 +464,11 @@ defmodule Drowzee.Controller.SleepScheduleController do
           Logger.debug("CronJob #{CronJob.name(cronjob)} suspended: #{suspended}")
 
           # check_fn determines if suspended is the expected state (true for sleep, false for wake)
-          check_fn.(%{"suspended" => suspended})
+          check_fn.(
+            cronjob["metadata"],
+            cronjob["spec"],
+            %{"suspended" => suspended}
+          )
         end)
 
       # Determine which resources we need to check based on what's present

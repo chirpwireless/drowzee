@@ -3,7 +3,7 @@ defmodule Drowzee.K8s.SleepSchedule do
 
   require Logger
 
-  alias Drowzee.K8s.{Deployment, StatefulSet, CronJob, Ingress, Condition}
+  alias Drowzee.K8s.{CronJob, Ingress, Condition}
 
   def name(sleep_schedule) do
     sleep_schedule["metadata"]["name"]
@@ -184,23 +184,29 @@ defmodule Drowzee.K8s.SleepSchedule do
       end)
       |> Enum.to_list()
 
-    # Separate successful and failed results
-    {found, missing} =
-      Enum.split_with(results, fn {_, result} -> match?({:ok, _}, result) end)
+    # Process each result to handle both tuple formats
+    {found_cronjobs, missing_resources} =
+      Enum.reduce(results, {[], []}, fn {name, result}, {found_acc, missing_acc} ->
+        case result do
+          {:ok, cronjob} ->
+            {[cronjob | found_acc], missing_acc}
 
-    found_cronjobs = Enum.map(found, fn {_, {:ok, cronjob}} -> cronjob end)
+          {:ok, cronjob, _resolved_name} ->
+            {[cronjob | found_acc], missing_acc}
 
-    missing_resources =
-      Enum.map(missing, fn {name, {:error, reason}} ->
-        %{
-          "kind" => "CronJob",
-          "name" => name,
-          "namespace" => namespace,
-          "error" => inspect(reason),
-          "reason" => reason.reason,
-          "message" => reason.message,
-          "status" => "NotFound"
-        }
+          {:error, reason} ->
+            missing_resource = %{
+              "kind" => "CronJob",
+              "name" => name,
+              "namespace" => namespace,
+              "error" => inspect(reason),
+              "reason" => reason.reason,
+              "message" => reason.message,
+              "status" => "NotFound"
+            }
+
+            {found_acc, [missing_resource | missing_acc]}
+        end
       end)
 
     if Enum.empty?(missing_resources) do
@@ -210,114 +216,28 @@ defmodule Drowzee.K8s.SleepSchedule do
     end
   end
 
-  def scale_down_deployments(sleep_schedule) do
-    Logger.debug("Scaling down deployments...")
-
-    case get_deployments(sleep_schedule) do
-      {:ok, deployments} ->
-        # All deployments found, proceed normally
-        scale_found_deployments(deployments)
-
-      {:partial, found_deployments, missing_resources} ->
-        # Some deployments were not found
-        Logger.warning("Some deployments were not found: #{inspect(missing_resources)}")
-
-        # Scale the deployments that were found
-        scaling_result = scale_found_deployments(found_deployments)
-
-        # Create a combined result that includes both scaling results and missing resources
-        case scaling_result do
-          {:ok, results} ->
-            # All found deployments scaled successfully, but we still have missing ones
-            {:partial, results, missing_resources}
-
-          {:partial, results, errors} ->
-            # Some found deployments failed to scale and we have missing ones
-            {:partial, results, errors ++ missing_resources}
-
-          {:error, error} ->
-            # Complete failure scaling found deployments
-            {:error, error}
-        end
-
-      {:error, error} ->
-        {:error, error}
-    end
-  end
-
-  # Helper function to scale deployments that were found
-  defp scale_found_deployments(deployments) do
+  # Helper function to scale resources using a module function
+  defp scale_resource_with_module(resources, scale_func) do
     results =
-      Enum.map(deployments, fn deployment ->
+      Enum.map(resources, fn resource ->
         try do
-          deployment = Deployment.save_original_replicas(deployment)
+          case scale_func.(resource) do
+            {:ok, scaled_resource} ->
+              {:ok, scaled_resource}
 
-          case Deployment.scale_deployment(deployment, 0) do
-            {:ok, scaled_deployment} ->
-              {:ok, scaled_deployment}
-
-            {:error, reason} ->
-              name = deployment["metadata"]["name"]
-              Logger.error("Error scaling down deployment: #{inspect(reason)}", name: name)
-              # Mark this specific resource as failed
-              failed_deployment =
-                put_in(
-                  deployment,
-                  ["metadata", "annotations", "drowzee.io/scale-failed"],
-                  "true"
-                )
-
-              failed_deployment =
-                put_in(
-                  failed_deployment,
-                  ["metadata", "annotations", "drowzee.io/scale-error"],
-                  "Failed to scale: #{inspect(reason)}"
-                )
-
-              {:error, failed_deployment,
-               "Failed to scale down deployment #{name}: #{inspect(reason)}"}
+            {:error, failed_resource, error_msg} ->
+              {:error, failed_resource, error_msg}
           end
         rescue
           e ->
-            name = deployment["metadata"]["name"]
-            Logger.error("Error scaling down deployment: #{inspect(e)}", name: name)
-            # Mark this specific resource as failed
-            failed_deployment =
-              put_in(
-                deployment,
-                ["metadata", "annotations", "drowzee.io/scale-failed"],
-                "true"
-              )
-
-            failed_deployment =
-              put_in(
-                failed_deployment,
-                ["metadata", "annotations", "drowzee.io/scale-error"],
-                "Exception: #{inspect(e)}"
-              )
-
-            {:error, failed_deployment, "Failed to scale down deployment #{name}: #{inspect(e)}"}
+            name = resource["metadata"]["name"]
+            Logger.error("Error scaling resource: #{inspect(e)}", name: name)
+            {:error, resource, "Exception during scaling: #{inspect(e)}"}
         catch
           kind, reason ->
-            name = deployment["metadata"]["name"]
-            Logger.error("Error scaling down deployment: #{inspect(reason)}", name: name)
-            # Mark this specific resource as failed
-            failed_deployment =
-              put_in(
-                deployment,
-                ["metadata", "annotations", "drowzee.io/scale-failed"],
-                "true"
-              )
-
-            failed_deployment =
-              put_in(
-                failed_deployment,
-                ["metadata", "annotations", "drowzee.io/scale-error"],
-                "Caught #{kind}: #{inspect(reason)}"
-              )
-
-            {:error, failed_deployment,
-             "Failed to scale down deployment #{name}: #{inspect(reason)}"}
+            name = resource["metadata"]["name"]
+            Logger.error("Error scaling resource: #{inspect(reason)}", name: name)
+            {:error, resource, "Caught #{kind} during scaling: #{inspect(reason)}"}
         end
       end)
 
@@ -336,20 +256,53 @@ defmodule Drowzee.K8s.SleepSchedule do
     end
   end
 
+  def scale_down_deployments(sleep_schedule) do
+    Logger.debug("Scaling down deployments...")
+
+    case get_deployments(sleep_schedule) do
+      {:ok, deployments} ->
+        # All deployments found, proceed normally
+        scale_resource_with_module(deployments, &Drowzee.K8s.Deployment.scale_down/1)
+
+      {:partial, found_deployments, missing_resources} ->
+        # Some deployments were not found
+        Logger.warning("Some deployments were not found: #{inspect(missing_resources)}")
+
+        # Scale the deployments that were found
+        scaling_result =
+          scale_resource_with_module(found_deployments, &Drowzee.K8s.Deployment.scale_down/1)
+
+        # Create a combined result that includes both scaling results and missing resources
+        case scaling_result do
+          {:ok, results} ->
+            # All found deployments scaled successfully, but we still have missing ones
+            {:partial, results, missing_resources}
+
+          {:partial, results, errors} ->
+            # Some found deployments failed to scale and we have missing ones
+            {:partial, results, errors ++ missing_resources}
+        end
+
+      {:error, error} ->
+        {:error, error}
+    end
+  end
+
   def scale_down_statefulsets(sleep_schedule) do
     Logger.debug("Scaling down statefulsets...")
 
     case get_statefulsets(sleep_schedule) do
       {:ok, statefulsets} ->
         # All statefulsets found, proceed normally
-        scale_found_statefulsets(statefulsets)
+        scale_resource_with_module(statefulsets, &Drowzee.K8s.StatefulSet.scale_down/1)
 
       {:partial, found_statefulsets, missing_resources} ->
         # Some statefulsets were not found
         Logger.warning("Some statefulsets were not found: #{inspect(missing_resources)}")
 
         # Scale the statefulsets that were found
-        scaling_result = scale_found_statefulsets(found_statefulsets)
+        scaling_result =
+          scale_resource_with_module(found_statefulsets, &Drowzee.K8s.StatefulSet.scale_down/1)
 
         # Create a combined result that includes both scaling results and missing resources
         case scaling_result do
@@ -360,10 +313,6 @@ defmodule Drowzee.K8s.SleepSchedule do
           {:partial, results, errors} ->
             # Some found statefulsets failed to scale and we have missing ones
             {:partial, results, errors ++ missing_resources}
-
-          {:error, error} ->
-            # Complete failure scaling found statefulsets
-            {:error, error}
         end
 
       {:error, error} ->
@@ -371,80 +320,92 @@ defmodule Drowzee.K8s.SleepSchedule do
     end
   end
 
-  # Helper function to scale statefulsets that were found
-  defp scale_found_statefulsets(statefulsets) do
+  def scale_up_deployments(sleep_schedule) do
+    Logger.debug("Scaling up deployments...")
+
+    case get_deployments(sleep_schedule) do
+      {:ok, deployments} ->
+        # All deployments found, proceed normally
+        scale_resource_with_module(deployments, &Drowzee.K8s.Deployment.scale_up/1)
+
+      {:partial, found_deployments, missing_resources} ->
+        # Some deployments were not found
+        Logger.warning("Some deployments were not found: #{inspect(missing_resources)}")
+
+        # Scale the deployments that were found
+        scaling_result =
+          scale_resource_with_module(found_deployments, &Drowzee.K8s.Deployment.scale_up/1)
+
+        # Create a combined result that includes both scaling results and missing resources
+        case scaling_result do
+          {:ok, results} ->
+            # All found deployments scaled successfully, but we still have missing ones
+            {:partial, results, missing_resources}
+
+          {:partial, results, errors} ->
+            # Some found deployments failed to scale and we have missing ones
+            {:partial, results, errors ++ missing_resources}
+        end
+
+      {:error, error} ->
+        {:error, error}
+    end
+  end
+
+  def scale_up_statefulsets(sleep_schedule) do
+    Logger.debug("Scaling up statefulsets...")
+
+    case get_statefulsets(sleep_schedule) do
+      {:ok, statefulsets} ->
+        # All statefulsets found, proceed normally
+        scale_resource_with_module(statefulsets, &Drowzee.K8s.StatefulSet.scale_up/1)
+
+      {:partial, found_statefulsets, missing_resources} ->
+        # Some statefulsets were not found
+        Logger.warning("Some statefulsets were not found: #{inspect(missing_resources)}")
+
+        # Scale the statefulsets that were found
+        scaling_result =
+          scale_resource_with_module(found_statefulsets, &Drowzee.K8s.StatefulSet.scale_up/1)
+
+        # Create a combined result that includes both scaling results and missing resources
+        case scaling_result do
+          {:ok, results} ->
+            # All found statefulsets scaled successfully, but we still have missing ones
+            {:partial, results, missing_resources}
+
+          {:partial, results, errors} ->
+            # Some found statefulsets failed to scale and we have missing ones
+            {:partial, results, errors ++ missing_resources}
+        end
+
+      {:error, error} ->
+        {:error, error}
+    end
+  end
+
+  # Helper function to process cronjobs using a module function
+  defp process_cronjobs_with_module(resources, operation_func) do
     results =
-      Enum.map(statefulsets, fn statefulset ->
+      Enum.map(resources, fn resource ->
         try do
-          statefulset = StatefulSet.save_original_replicas(statefulset)
+          case operation_func.(resource) do
+            {:ok, processed_resource} ->
+              {:ok, processed_resource}
 
-          case StatefulSet.scale_statefulset(statefulset, 0) do
-            {:ok, scaled_statefulset} ->
-              {:ok, scaled_statefulset}
-
-            {:error, reason} ->
-              name = statefulset["metadata"]["name"]
-              Logger.error("Error scaling down statefulset: #{inspect(reason)}", name: name)
-              # Mark this specific resource as failed
-              failed_statefulset =
-                put_in(
-                  statefulset,
-                  ["metadata", "annotations", "drowzee.io/scale-failed"],
-                  "true"
-                )
-
-              failed_statefulset =
-                put_in(
-                  failed_statefulset,
-                  ["metadata", "annotations", "drowzee.io/scale-error"],
-                  "Failed to scale: #{inspect(reason)}"
-                )
-
-              {:error, failed_statefulset,
-               "Failed to scale down statefulset #{name}: #{inspect(reason)}"}
+            {:error, failed_resource, error_msg} ->
+              {:error, failed_resource, error_msg}
           end
         rescue
           e ->
-            name = statefulset["metadata"]["name"]
-            Logger.error("Error scaling down statefulset: #{inspect(e)}", name: name)
-            # Mark this specific resource as failed
-            failed_statefulset =
-              put_in(
-                statefulset,
-                ["metadata", "annotations", "drowzee.io/scale-failed"],
-                "true"
-              )
-
-            failed_statefulset =
-              put_in(
-                failed_statefulset,
-                ["metadata", "annotations", "drowzee.io/scale-error"],
-                "Exception: #{inspect(e)}"
-              )
-
-            {:error, failed_statefulset,
-             "Failed to scale down statefulset #{name}: #{inspect(e)}"}
+            name = resource["metadata"]["name"]
+            Logger.error("Error processing cronjob: #{inspect(e)}", name: name)
+            {:error, resource, "Exception during processing: #{inspect(e)}"}
         catch
           kind, reason ->
-            name = statefulset["metadata"]["name"]
-            Logger.error("Error scaling down statefulset: #{inspect(reason)}", name: name)
-            # Mark this specific resource as failed
-            failed_statefulset =
-              put_in(
-                statefulset,
-                ["metadata", "annotations", "drowzee.io/scale-failed"],
-                "true"
-              )
-
-            failed_statefulset =
-              put_in(
-                failed_statefulset,
-                ["metadata", "annotations", "drowzee.io/scale-error"],
-                "Caught #{kind}: #{inspect(reason)}"
-              )
-
-            {:error, failed_statefulset,
-             "Failed to scale down statefulset #{name}: #{inspect(reason)}"}
+            name = resource["metadata"]["name"]
+            Logger.error("Error processing cronjob: #{inspect(reason)}", name: name)
+            {:error, resource, "Caught #{kind} during processing: #{inspect(reason)}"}
         end
       end)
 
@@ -466,402 +427,64 @@ defmodule Drowzee.K8s.SleepSchedule do
   def suspend_cronjobs(sleep_schedule) do
     Logger.debug("Suspending cronjobs...")
 
+    # Create a function that suspends a cronjob
+    suspend_func = fn cronjob -> CronJob.suspend_cronjob(cronjob, true) end
+
     case get_cronjobs(sleep_schedule) do
       {:ok, cronjobs} ->
-        # Process each cronjob and collect results
-        scaling_result =
-          Enum.reduce_while(cronjobs, {[], []}, fn cronjob, {successes, failures} ->
-            case CronJob.suspend_cronjob(cronjob, true) do
-              {:ok, suspended_cronjob} ->
-                {:cont, {[suspended_cronjob | successes], failures}}
-
-              {:error, failed_cronjob, error_msg} ->
-                # Save the failed cronjob and continue with others
-                {:cont, {successes, [{:error, failed_cronjob, error_msg} | failures]}}
-            end
-          end)
-
-        case scaling_result do
-          {successes, []} ->
-            # All operations succeeded
-            {:ok, successes}
-
-          {successes, failures} ->
-            # Some operations failed
-            {:partial, successes, failures}
-        end
+        # All cronjobs found, proceed normally
+        process_cronjobs_with_module(cronjobs, suspend_func)
 
       {:partial, found_cronjobs, missing_resources} ->
         # Some cronjobs were not found
         Logger.warning("Some cronjobs were not found: #{inspect(missing_resources)}")
 
-        # Suspend the cronjobs that were found
-        scaling_result =
-          Enum.reduce_while(found_cronjobs, {[], []}, fn cronjob, {successes, failures} ->
-            case CronJob.suspend_cronjob(cronjob, true) do
-              {:ok, suspended_cronjob} ->
-                {:cont, {[suspended_cronjob | successes], failures}}
-
-              {:error, failed_cronjob, error_msg} ->
-                # Save the failed cronjob and continue with others
-                {:cont, {successes, [{:error, failed_cronjob, error_msg} | failures]}}
-            end
-          end)
-
-        case scaling_result do
-          {successes, []} ->
-            # All found cronjobs were suspended successfully
-            {:partial, successes, missing_resources}
-
-          {successes, failures} ->
-            # Some found cronjobs failed to suspend
-            {:partial, successes, missing_resources ++ failures}
-        end
-
-      {:error, error} ->
-        {:error, error}
-    end
-  end
-
-  def scale_up_deployments(sleep_schedule) do
-    Logger.debug("Scaling up deployments...")
-
-    case get_deployments(sleep_schedule) do
-      {:ok, deployments} ->
-        # All deployments found, proceed normally
-        scale_up_found_deployments(deployments)
-
-      {:partial, found_deployments, missing_resources} ->
-        # Some deployments were not found
-        Logger.warning("Some deployments were not found: #{inspect(missing_resources)}")
-
-        # Scale the deployments that were found
-        scaling_result = scale_up_found_deployments(found_deployments)
+        # Process the cronjobs that were found
+        scaling_result = process_cronjobs_with_module(found_cronjobs, suspend_func)
 
         # Create a combined result that includes both scaling results and missing resources
         case scaling_result do
           {:ok, results} ->
-            # All found deployments scaled successfully, but we still have missing ones
+            # All found cronjobs processed successfully, but we still have missing ones
             {:partial, results, missing_resources}
 
           {:partial, results, errors} ->
-            # Some found deployments failed to scale and we have missing ones
+            # Some found cronjobs failed to process and we have missing ones
             {:partial, results, errors ++ missing_resources}
-
-          {:error, error} ->
-            # Complete failure scaling found deployments
-            {:error, error}
         end
 
       {:error, error} ->
         {:error, error}
-    end
-  end
-
-  # Helper function to scale up deployments that were found
-  defp scale_up_found_deployments(deployments) do
-    results =
-      Enum.map(deployments, fn deployment ->
-        try do
-          original = Deployment.get_original_replicas(deployment)
-
-          case Deployment.scale_deployment(deployment, original) do
-            {:ok, scaled_deployment} ->
-              # Clear any previous failure annotations if they exist
-              scaled_deployment =
-                pop_in(scaled_deployment, [
-                  "metadata",
-                  "annotations",
-                  "drowzee.io/scale-failed"
-                ])
-                |> elem(1)
-
-              scaled_deployment =
-                pop_in(scaled_deployment, [
-                  "metadata",
-                  "annotations",
-                  "drowzee.io/scale-error"
-                ])
-                |> elem(1)
-
-              {:ok, scaled_deployment}
-
-            {:error, reason} ->
-              name = deployment["metadata"]["name"]
-              Logger.error("Error scaling up deployment: #{inspect(reason)}", name: name)
-              # Mark this specific resource as failed
-              failed_deployment =
-                put_in(
-                  deployment,
-                  ["metadata", "annotations", "drowzee.io/scale-failed"],
-                  "true"
-                )
-
-              failed_deployment =
-                put_in(
-                  failed_deployment,
-                  ["metadata", "annotations", "drowzee.io/scale-error"],
-                  "Failed to scale: #{inspect(reason)}"
-                )
-
-              {:error, failed_deployment,
-               "Failed to scale up deployment #{name}: #{inspect(reason)}"}
-          end
-        rescue
-          e ->
-            name = deployment["metadata"]["name"]
-            Logger.error("Error scaling up deployment: #{inspect(e)}", name: name)
-            # Mark this specific resource as failed
-            failed_deployment =
-              put_in(
-                deployment,
-                ["metadata", "annotations", "drowzee.io/scale-failed"],
-                "true"
-              )
-
-            failed_deployment =
-              put_in(
-                failed_deployment,
-                ["metadata", "annotations", "drowzee.io/scale-error"],
-                "Exception: #{inspect(e)}"
-              )
-
-            {:error, failed_deployment, "Failed to scale up deployment #{name}: #{inspect(e)}"}
-        catch
-          kind, reason ->
-            name = deployment["metadata"]["name"]
-            Logger.error("Error scaling up deployment: #{inspect(reason)}", name: name)
-            # Mark this specific resource as failed
-            failed_deployment =
-              put_in(
-                deployment,
-                ["metadata", "annotations", "drowzee.io/scale-failed"],
-                "true"
-              )
-
-            failed_deployment =
-              put_in(
-                failed_deployment,
-                ["metadata", "annotations", "drowzee.io/scale-error"],
-                "Caught #{kind}: #{inspect(reason)}"
-              )
-
-            {:error, failed_deployment,
-             "Failed to scale up deployment #{name}: #{inspect(reason)}"}
-        end
-      end)
-
-    # Check if any operations failed
-    errors =
-      Enum.filter(results, fn
-        {:error, _, _} -> true
-        _ -> false
-      end)
-
-    if Enum.empty?(errors) do
-      {:ok, results}
-    else
-      # Return both successful results and errors
-      {:partial, results, errors}
-    end
-  end
-
-  def scale_up_statefulsets(sleep_schedule) do
-    Logger.debug("Scaling up statefulsets...")
-
-    case get_statefulsets(sleep_schedule) do
-      {:ok, statefulsets} ->
-        # All statefulsets found, proceed normally
-        scale_up_found_statefulsets(statefulsets)
-
-      {:partial, found_statefulsets, missing_resources} ->
-        # Some statefulsets were not found
-        Logger.warning("Some statefulsets were not found: #{inspect(missing_resources)}")
-
-        # Scale the statefulsets that were found
-        scaling_result = scale_up_found_statefulsets(found_statefulsets)
-
-        # Create a combined result that includes both scaling results and missing resources
-        case scaling_result do
-          {:ok, results} ->
-            # All found statefulsets scaled successfully, but we still have missing ones
-            {:partial, results, missing_resources}
-
-          {:partial, results, errors} ->
-            # Some found statefulsets failed to scale and we have missing ones
-            {:partial, results, errors ++ missing_resources}
-
-          {:error, error} ->
-            # Complete failure scaling found statefulsets
-            {:error, error}
-        end
-
-      {:error, error} ->
-        {:error, error}
-    end
-  end
-
-  # Helper function to scale up statefulsets that were found
-  defp scale_up_found_statefulsets(statefulsets) do
-    results =
-      Enum.map(statefulsets, fn statefulset ->
-        try do
-          original = StatefulSet.get_original_replicas(statefulset)
-
-          case StatefulSet.scale_statefulset(statefulset, original) do
-            {:ok, scaled_statefulset} ->
-              # Clear any previous failure annotations if they exist
-              scaled_statefulset =
-                pop_in(scaled_statefulset, [
-                  "metadata",
-                  "annotations",
-                  "drowzee.io/scale-failed"
-                ])
-                |> elem(1)
-
-              scaled_statefulset =
-                pop_in(scaled_statefulset, [
-                  "metadata",
-                  "annotations",
-                  "drowzee.io/scale-error"
-                ])
-                |> elem(1)
-
-              {:ok, scaled_statefulset}
-
-            {:error, reason} ->
-              name = statefulset["metadata"]["name"]
-              Logger.error("Error scaling up statefulset: #{inspect(reason)}", name: name)
-              # Mark this specific resource as failed
-              failed_statefulset =
-                put_in(
-                  statefulset,
-                  ["metadata", "annotations", "drowzee.io/scale-failed"],
-                  "true"
-                )
-
-              failed_statefulset =
-                put_in(
-                  failed_statefulset,
-                  ["metadata", "annotations", "drowzee.io/scale-error"],
-                  "Failed to scale: #{inspect(reason)}"
-                )
-
-              {:error, failed_statefulset,
-               "Failed to scale up statefulset #{name}: #{inspect(reason)}"}
-          end
-        rescue
-          e ->
-            name = statefulset["metadata"]["name"]
-            Logger.error("Error scaling up statefulset: #{inspect(e)}", name: name)
-            # Mark this specific resource as failed
-            failed_statefulset =
-              put_in(
-                statefulset,
-                ["metadata", "annotations", "drowzee.io/scale-failed"],
-                "true"
-              )
-
-            failed_statefulset =
-              put_in(
-                failed_statefulset,
-                ["metadata", "annotations", "drowzee.io/scale-error"],
-                "Exception: #{inspect(e)}"
-              )
-
-            {:error, failed_statefulset, "Failed to scale up statefulset #{name}: #{inspect(e)}"}
-        catch
-          kind, reason ->
-            name = statefulset["metadata"]["name"]
-            Logger.error("Error scaling up statefulset: #{inspect(reason)}", name: name)
-            # Mark this specific resource as failed
-            failed_statefulset =
-              put_in(
-                statefulset,
-                ["metadata", "annotations", "drowzee.io/scale-failed"],
-                "true"
-              )
-
-            failed_statefulset =
-              put_in(
-                failed_statefulset,
-                ["metadata", "annotations", "drowzee.io/scale-error"],
-                "Caught #{kind}: #{inspect(reason)}"
-              )
-
-            {:error, failed_statefulset,
-             "Failed to scale up statefulset #{name}: #{inspect(reason)}"}
-        end
-      end)
-
-    # Check if any operations failed
-    errors =
-      Enum.filter(results, fn
-        {:error, _, _} -> true
-        _ -> false
-      end)
-
-    if Enum.empty?(errors) do
-      {:ok, results}
-    else
-      # Return both successful results and errors
-      {:partial, results, errors}
     end
   end
 
   def resume_cronjobs(sleep_schedule) do
     Logger.debug("Resuming cronjobs...")
 
+    # Create a function that resumes a cronjob
+    resume_func = fn cronjob -> CronJob.suspend_cronjob(cronjob, false) end
+
     case get_cronjobs(sleep_schedule) do
       {:ok, cronjobs} ->
-        # Process each cronjob and collect results
-        scaling_result =
-          Enum.reduce_while(cronjobs, {[], []}, fn cronjob, {successes, failures} ->
-            case CronJob.suspend_cronjob(cronjob, false) do
-              {:ok, resumed_cronjob} ->
-                {:cont, {[resumed_cronjob | successes], failures}}
-
-              {:error, failed_cronjob, error_msg} ->
-                # Save the failed cronjob and continue with others
-                {:cont, {successes, [{:error, failed_cronjob, error_msg} | failures]}}
-            end
-          end)
-
-        case scaling_result do
-          {successes, []} ->
-            # All operations succeeded
-            {:ok, successes}
-
-          {successes, failures} ->
-            # Some operations failed
-            {:partial, successes, failures}
-        end
+        # All cronjobs found, proceed normally
+        process_cronjobs_with_module(cronjobs, resume_func)
 
       {:partial, found_cronjobs, missing_resources} ->
         # Some cronjobs were not found
         Logger.warning("Some cronjobs were not found: #{inspect(missing_resources)}")
 
-        # Resume the cronjobs that were found
-        scaling_result =
-          Enum.reduce_while(found_cronjobs, {[], []}, fn cronjob, {successes, failures} ->
-            case CronJob.suspend_cronjob(cronjob, false) do
-              {:ok, resumed_cronjob} ->
-                {:cont, {[resumed_cronjob | successes], failures}}
+        # Process the cronjobs that were found
+        scaling_result = process_cronjobs_with_module(found_cronjobs, resume_func)
 
-              {:error, failed_cronjob, error_msg} ->
-                # Save the failed cronjob and continue with others
-                {:cont, {successes, [{:error, failed_cronjob, error_msg} | failures]}}
-            end
-          end)
-
+        # Create a combined result that includes both scaling results and missing resources
         case scaling_result do
-          {successes, []} ->
-            # All found cronjobs were resumed successfully
-            {:partial, successes, missing_resources}
+          {:ok, results} ->
+            # All found cronjobs processed successfully, but we still have missing ones
+            {:partial, results, missing_resources}
 
-          {successes, failures} ->
-            # Some found cronjobs failed to resume
-            {:partial, successes, missing_resources ++ failures}
+          {:partial, results, errors} ->
+            # Some found cronjobs failed to process and we have missing ones
+            {:partial, results, errors ++ missing_resources}
         end
 
       {:error, error} ->

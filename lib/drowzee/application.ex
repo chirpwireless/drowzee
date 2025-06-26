@@ -7,15 +7,18 @@ defmodule Drowzee.Application do
 
   @impl true
   def start(_type, _args) do
-    # Initialize the scaling coordinator
-    Drowzee.Controller.SleepScheduleController.start_coordinator()
-    
+    # We no longer initialize the coordinator directly here as it's managed by the supervisor
+    # Drowzee.Controller.SleepScheduleController.start_coordinator()
+
     children = [
       DrowzeeWeb.Telemetry,
       {DNSCluster, query: Application.get_env(:drowzee, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Drowzee.PubSub},
       {Drowzee.Operator, conn: Drowzee.K8sConn.get!(), enable_leader_election: false},
       Bonny.PeriodicTask,
+
+      # Add the CoordinatorSupervisor to manage the scaling coordinator
+      Drowzee.CoordinatorSupervisor,
 
       # Start to serve requests, typically the last entry
       DrowzeeWeb.Endpoint
