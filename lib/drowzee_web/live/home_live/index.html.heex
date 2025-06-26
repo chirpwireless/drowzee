@@ -1,5 +1,20 @@
 <div class="flex flex-col md:flex-row relative max-w-6xl mx-auto justify-center">
-  <!-- Cloud-shaped Table of Contents - Desktop & Mobile -->
+  <script>
+    function toggleResourcesClient(scheduleId) {
+      // Get the resources container
+      const resourcesContainer = document.getElementById(`resources-${scheduleId}`);
+      const toggleButton = document.getElementById(`toggle-btn-${scheduleId}`);
+      
+      // Toggle visibility immediately without waiting for server response
+      if (resourcesContainer.style.display === 'none') {
+        resourcesContainer.style.display = '';
+      } else {
+        resourcesContainer.style.display = 'none';
+      }
+    }
+  </script>
+  
+<!-- Cloud-shaped Table of Contents - Desktop & Mobile -->
   <div class="md:sticky md:top-4 md:self-start md:mr-4 md:w-72 z-30">
     <div class="fixed md:relative top-2 right-2 md:top-0 md:right-0 md:left-0 pointer-events-auto">
       <button
@@ -429,32 +444,65 @@
             </div>
           <% end %>
 
-          <% has_resources = sleep_schedule["spec"]["deployments"] != [] || (sleep_schedule["spec"]["statefulsets"] || []) != [] || (sleep_schedule["spec"]["cronjobs"] || []) != [] %>
-          
+          <% has_resources =
+            sleep_schedule["spec"]["deployments"] != [] ||
+              (sleep_schedule["spec"]["statefulsets"] || []) != [] ||
+              (sleep_schedule["spec"]["cronjobs"] || []) != [] %>
+
+          <% schedule_id =
+            "#{sleep_schedule["metadata"]["namespace"]}/#{sleep_schedule["metadata"]["name"]}" %>
+          <% is_visible = MapSet.member?(@visible_schedules, schedule_id) %>
           <%= if has_resources && @name == nil do %>
             <div class="mt-4">
-              <button 
-                phx-click="toggle_resources" 
+              <button
+                phx-click="toggle_resources"
+                phx-value-id={schedule_id}
+                onclick={"toggleResourcesClient('#{schedule_id}')"}
+                id={"toggle-btn-#{schedule_id}"}
                 class="flex items-center text-sm font-medium text-gray-700 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 rounded-lg px-3 py-2 transition-colors duration-200"
               >
                 <span class="mr-2">
-                  <%= if @show_resources do %>
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                  <%= if is_visible do %>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      class="h-4 w-4"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M19 9l-7 7-7-7"
+                      />
                     </svg>
                   <% else %>
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      class="h-4 w-4"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M9 5l7 7-7 7"
+                      />
                     </svg>
                   <% end %>
                 </span>
                 <span>
-                  <%= if @show_resources do %>
+                  <%= if is_visible do %>
                     Hide Resources
                   <% else %>
                     Show Resources
                     <span class="text-xs ml-1 text-gray-500">
-                      (<%= length(sleep_schedule["spec"]["deployments"]) + length(sleep_schedule["spec"]["statefulsets"] || []) + length(sleep_schedule["spec"]["cronjobs"] || []) %>)
+                      ({length(sleep_schedule["spec"]["deployments"]) +
+                        length(sleep_schedule["spec"]["statefulsets"] || []) +
+                        length(sleep_schedule["spec"]["cronjobs"] || [])})
                     </span>
                   <% end %>
                 </span>
@@ -462,7 +510,10 @@
             </div>
           <% end %>
 
-          <%= if @show_resources || @name != nil do %>
+          <div
+            id={"resources-#{schedule_id}"}
+            style={if is_visible || @name != nil, do: "", else: "display: none;"}
+          >
             <%= if sleep_schedule["spec"]["deployments"] != [] do %>
               <div class="mt-4">
                 <h3 class="text-lg font-medium text-gray-700 mb-2">📦 Deployments:</h3>
@@ -471,13 +522,50 @@
                     <li class="bg-gray-100 rounded-lg px-3 py-1 text-sm">
                       <% d = @deployments_by_name[deployment["name"]] %>
                       <%= if @name do %>
-                        <%= if d && (Map.get(d["spec"], "replicas", 0) > 0) do %>
-                          🚀
-                        <% else %>
-                          💤
+                        <%= cond do %>
+                          <% is_nil(d) -> %>
+                            <span title="Resource not found in Kubernetes" class="text-red-500">
+                              ❓
+                            </span>
+                          <% d && d["metadata"]["annotations"] && d["metadata"]["annotations"]["drowzee.io/scale-failed"] == "true" -> %>
+                            <span
+                              title={
+                                d["metadata"]["annotations"]["drowzee.io/scale-error"] ||
+                                  "Failed to scale"
+                              }
+                              class="text-amber-500"
+                            >
+                              ⚠️
+                            </span>
+                          <% d && (Map.get(d["spec"], "replicas", 0) > 0) -> %>
+                            🚀
+                          <% true -> %>
+                            💤
                         <% end %>
                       <% end %>
                       <span class="ml-1">{deployment["name"]}</span>
+                      <%= if d && d["metadata"]["annotations"] && d["metadata"]["annotations"]["drowzee.io/scale-failed"] == "true" do %>
+                        <span
+                          class="ml-1 text-red-500"
+                          title={
+                            d["metadata"]["annotations"]["drowzee.io/scale-error"] ||
+                              "Failed to scale"
+                          }
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="h-4 w-4 inline"
+                            viewBox="0 0 20 20"
+                            fill="currentColor"
+                          >
+                            <path
+                              fill-rule="evenodd"
+                              d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                              clip-rule="evenodd"
+                            />
+                          </svg>
+                        </span>
+                      <% end %>
                     </li>
                   <% end %>
                 </ul>
@@ -492,13 +580,50 @@
                     <li class="bg-gray-100 rounded-lg px-3 py-1 text-sm">
                       <% s = @statefulsets_by_name[statefulset["name"]] %>
                       <%= if @name do %>
-                        <%= if s && (Map.get(s["spec"], "replicas", 0) > 0) do %>
-                          🚀
-                        <% else %>
-                          💤
+                        <%= cond do %>
+                          <% is_nil(s) -> %>
+                            <span title="Resource not found in Kubernetes" class="text-red-500">
+                              ❓
+                            </span>
+                          <% s && s["metadata"]["annotations"] && s["metadata"]["annotations"]["drowzee.io/scale-failed"] == "true" -> %>
+                            <span
+                              title={
+                                s["metadata"]["annotations"]["drowzee.io/scale-error"] ||
+                                  "Failed to scale"
+                              }
+                              class="text-amber-500"
+                            >
+                              ⚠️
+                            </span>
+                          <% s && (Map.get(s["spec"], "replicas", 0) > 0) -> %>
+                            🚀
+                          <% true -> %>
+                            💤
                         <% end %>
                       <% end %>
                       <span class="ml-1">{statefulset["name"]}</span>
+                      <%= if s && s["metadata"]["annotations"] && s["metadata"]["annotations"]["drowzee.io/scale-failed"] == "true" do %>
+                        <span
+                          class="ml-1 text-red-500"
+                          title={
+                            s["metadata"]["annotations"]["drowzee.io/scale-error"] ||
+                              "Failed to scale"
+                          }
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="h-4 w-4 inline"
+                            viewBox="0 0 20 20"
+                            fill="currentColor"
+                          >
+                            <path
+                              fill-rule="evenodd"
+                              d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                              clip-rule="evenodd"
+                            />
+                          </svg>
+                        </span>
+                      <% end %>
                     </li>
                   <% end %>
                 </ul>
@@ -513,10 +638,15 @@
                     <li class="bg-gray-100 rounded-lg px-3 py-1 text-sm">
                       <% c = @cronjobs_by_name[cronjob["name"]] %>
                       <%= if @name do %>
-                        <%= if c && Map.get(c["spec"], "suspend", false) == false do %>
-                          🚀
-                        <% else %>
-                          💤
+                        <%= cond do %>
+                          <% is_nil(c) -> %>
+                            <span title="Resource not found in Kubernetes" class="text-red-500">
+                              ❓
+                            </span>
+                          <% c && Map.get(c["spec"], "suspend", false) == false -> %>
+                            🚀
+                          <% true -> %>
+                            💤
                         <% end %>
                       <% end %>
                       <span class="ml-1">{cronjob["name"]}</span>
@@ -525,20 +655,20 @@
                 </ul>
               </div>
             <% end %>
-          <% end %>
+          </div>
 
           <%= if get_condition(sleep_schedule, "Error")["status"] == "True" do %>
             <div class="grid grid-cols-2 sm:grid-cols-1 gap-4 mt-6 text-sm">
-              <div class="p-3 bg-gray-50 rounded-lg shadow-sm border">
+              <div class="p-3 bg-red-50 rounded-lg shadow-sm border border-red-200">
                 <div class="flex justify-between items-center">
-                  <div class="font-semibold text-gray-800 mb-1">
+                  <div class="font-semibold text-red-700 mb-1">
                     🚨 Error
                   </div>
-                  <div class="text-gray-800 mb-1">
+                  <div class="text-red-600 mb-1">
                     {last_transaction_time(sleep_schedule, "Error")}
                   </div>
                 </div>
-                <div class="text-gray-500 text-xs mt-1">
+                <div class="text-red-600 text-xs mt-1">
                   {get_condition(sleep_schedule, "Error")["message"]}
                 </div>
               </div>

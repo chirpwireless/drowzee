@@ -14,16 +14,17 @@ defmodule DrowzeeWeb.HomeLive.Index do
       Phoenix.PubSub.subscribe(Drowzee.PubSub, "sleep_schedule:updates")
 
       # Schedule periodic refresh to prevent connection issues
-      Process.send_after(self(), :refresh_schedules, @refresh_interval)
+      Process.send_after(self(), :refresh, @refresh_interval)
     end
 
     socket =
       socket
-      |> assign(:search, "")
-      |> assign(:filtered_sleep_schedules, nil)
       |> assign(:namespace, nil)
       |> assign(:name, nil)
-      |> assign(:show_resources, false)
+      |> assign(:search, "")
+      |> assign(:filtered_sleep_schedules, nil)
+      |> assign(:visible_schedules, MapSet.new())
+      |> load_sleep_schedules()
 
     {:ok, socket}
   end
@@ -209,8 +210,17 @@ defmodule DrowzeeWeb.HomeLive.Index do
   end
 
   @impl true
-  def handle_event("toggle_resources", _params, socket) do
-    {:noreply, assign(socket, :show_resources, !socket.assigns.show_resources)}
+  def handle_event("toggle_resources", %{"id" => schedule_id}, socket) do
+    visible_schedules = socket.assigns.visible_schedules
+
+    updated_visible_schedules =
+      if MapSet.member?(visible_schedules, schedule_id) do
+        MapSet.delete(visible_schedules, schedule_id)
+      else
+        MapSet.put(visible_schedules, schedule_id)
+      end
+
+    {:noreply, assign(socket, :visible_schedules, updated_visible_schedules)}
   end
 
   @impl true
@@ -275,12 +285,13 @@ defmodule DrowzeeWeb.HomeLive.Index do
 
   defp load_sleep_schedules(socket) do
     # Get all sleep schedules for the current namespace or specific schedule
-    {sleep_schedules, deployments_by_name, statefulsets_by_name, cronjobs_by_name} =
+    {sleep_schedules, deployments_by_name, statefulsets_by_name, cronjobs_by_name,
+     missing_resources} =
       case socket.assigns.name do
         nil ->
           # When no specific name is provided, get all schedules for the namespace
           schedules = Drowzee.K8s.sleep_schedules(socket.assigns.namespace)
-          {schedules, %{}, %{}, %{}}
+          {schedules, %{}, %{}, %{}, []}
 
         name ->
           # When a specific name is provided, fetch only that schedule directly
@@ -291,38 +302,36 @@ defmodule DrowzeeWeb.HomeLive.Index do
               {:error, _} -> []
             end
 
-          deployments =
-            schedules
-            |> Enum.flat_map(fn schedule ->
-              case Drowzee.K8s.SleepSchedule.get_deployments(schedule) do
-                {:ok, ds} -> ds
-                {:error, _} -> []
-              end
-            end)
+          # Only fetch resources if we have a specific schedule
+          # This avoids unnecessary API calls
+          {deployments, statefulsets, cronjobs, missing_resources} =
+            case schedules do
+              [schedule] ->
+                try do
+                  # Check for missing resources annotation
+                  missing_resources = get_missing_resources(schedule)
 
-          statefulsets =
-            schedules
-            |> Enum.flat_map(fn schedule ->
-              case Drowzee.K8s.SleepSchedule.get_statefulsets(schedule) do
-                {:ok, ss} -> ss
-                {:error, _} -> []
-              end
-            end)
+                  # Get available resources
+                  {
+                    Drowzee.K8s.get_deployments_for_schedule(schedule),
+                    Drowzee.K8s.get_statefulsets_for_schedule(schedule),
+                    Drowzee.K8s.get_cronjobs_for_schedule(schedule),
+                    missing_resources
+                  }
+                rescue
+                  _ -> {[], [], [], []}
+                end
 
-          cronjobs =
-            schedules
-            |> Enum.flat_map(fn schedule ->
-              case Drowzee.K8s.SleepSchedule.get_cronjobs(schedule) do
-                {:ok, cs} -> cs
-                {:error, _} -> []
-              end
-            end)
+              _ ->
+                {[], [], [], []}
+            end
 
           {
             schedules,
             Map.new(deployments, &{&1["metadata"]["name"], &1}),
             Map.new(statefulsets, &{&1["metadata"]["name"], &1}),
-            Map.new(cronjobs, &{&1["metadata"]["name"], &1})
+            Map.new(cronjobs, &{&1["metadata"]["name"], &1}),
+            missing_resources
           }
       end
 
@@ -360,6 +369,7 @@ defmodule DrowzeeWeb.HomeLive.Index do
     |> assign(:deployments_by_name, deployments_by_name)
     |> assign(:statefulsets_by_name, statefulsets_by_name)
     |> assign(:cronjobs_by_name, cronjobs_by_name)
+    |> assign(:missing_resources, missing_resources)
     |> filter_sleep_schedules(socket.assigns.search)
   end
 
@@ -461,6 +471,28 @@ defmodule DrowzeeWeb.HomeLive.Index do
       {namespace, calculate_namespace_status(ns_schedules)}
     end)
     |> Map.new()
+  end
+
+  # Extract missing resources from the sleep schedule annotation
+  def get_missing_resources(sleep_schedule) do
+    annotations = get_in(sleep_schedule, ["metadata", "annotations"]) || %{}
+    missing_resources_json = Map.get(annotations, "drowzee.io/missing-resources")
+
+    if missing_resources_json do
+      case Jason.decode(missing_resources_json) do
+        {:ok, resources} -> resources
+        _ -> []
+      end
+    else
+      []
+    end
+  end
+
+  # Check if a resource is missing based on the missing_resources list
+  def resource_missing?(missing_resources, kind, name) do
+    Enum.any?(missing_resources, fn resource ->
+      resource["kind"] == kind && resource["name"] == name
+    end)
   end
 
   def replace_sleep_schedule(socket, updated_sleep_schedule) do
