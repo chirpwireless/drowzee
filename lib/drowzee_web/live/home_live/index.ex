@@ -8,7 +8,8 @@ defmodule DrowzeeWeb.HomeLive.Index do
   def mount(_params, _session, socket) do
     if connected?(socket), do: Phoenix.PubSub.subscribe(Drowzee.PubSub, "sleep_schedule:updates")
 
-    socket = socket
+    socket =
+      socket
       |> assign(:search, "")
       |> assign(:filtered_sleep_schedules, nil)
       |> assign(:namespace, nil)
@@ -19,7 +20,8 @@ defmodule DrowzeeWeb.HomeLive.Index do
 
   @impl true
   def handle_params(%{"namespace" => namespace, "name" => name}, _url, socket) do
-    socket = socket
+    socket =
+      socket
       |> assign(:page_title, "#{namespace} / #{name}")
       |> assign(:namespace, namespace)
       |> assign(:name, name)
@@ -30,7 +32,8 @@ defmodule DrowzeeWeb.HomeLive.Index do
 
   @impl true
   def handle_params(%{"namespace" => namespace}, _url, socket) do
-    socket = socket
+    socket =
+      socket
       |> assign(:page_title, "#{namespace}")
       |> assign(:namespace, namespace)
       |> load_sleep_schedules()
@@ -40,7 +43,8 @@ defmodule DrowzeeWeb.HomeLive.Index do
 
   @impl true
   def handle_params(_params, _url, socket) do
-    socket = socket
+    socket =
+      socket
       |> assign(:page_title, "All Namespaces")
       |> load_sleep_schedules()
 
@@ -51,16 +55,26 @@ defmodule DrowzeeWeb.HomeLive.Index do
   def handle_event("wake_schedule", %{"name" => name, "namespace" => namespace}, socket) do
     sleep_schedule = Drowzee.K8s.get_sleep_schedule!(name, namespace)
 
-    socket = case Drowzee.K8s.manual_wake_up(sleep_schedule) do
-      {:ok, sleep_schedule} ->
-        # Note: Bit of a hack to make the UI update immediately rather than waiting for the controller to handle the ManualOverride action
-        sleep_schedule = Drowzee.K8s.SleepSchedule.put_condition(sleep_schedule, "Transitioning", "True", "WakingUp", "Waking up")
-        replace_sleep_schedule(socket, sleep_schedule)
-      {:error, error} ->
-        socket
-        |> load_sleep_schedules()
-        |> put_flash(:error, "Failed to wake up #{name}: #{inspect(error)}")
-    end
+    socket =
+      case Drowzee.K8s.manual_wake_up(sleep_schedule) do
+        {:ok, sleep_schedule} ->
+          # Note: Bit of a hack to make the UI update immediately rather than waiting for the controller to handle the ManualOverride action
+          sleep_schedule =
+            Drowzee.K8s.SleepSchedule.put_condition(
+              sleep_schedule,
+              "Transitioning",
+              "True",
+              "WakingUp",
+              "Waking up"
+            )
+
+          replace_sleep_schedule(socket, sleep_schedule)
+
+        {:error, error} ->
+          socket
+          |> load_sleep_schedules()
+          |> put_flash(:error, "Failed to wake up #{name}: #{inspect(error)}")
+      end
 
     {:noreply, socket}
   end
@@ -69,16 +83,26 @@ defmodule DrowzeeWeb.HomeLive.Index do
   def handle_event("sleep_schedule", %{"name" => name, "namespace" => namespace}, socket) do
     sleep_schedule = Drowzee.K8s.get_sleep_schedule!(name, namespace)
 
-    socket = case Drowzee.K8s.manual_sleep(sleep_schedule) do
-      {:ok, sleep_schedule} ->
-        # Note: Bit of a hack to make the UI update immediately rather than waiting for the controller to handle the ManualOverride action
-        sleep_schedule = Drowzee.K8s.SleepSchedule.put_condition(sleep_schedule, "Transitioning", "True", "Sleeping", "Going to sleep")
-        replace_sleep_schedule(socket, sleep_schedule)
-      {:error, error} ->
-        socket
-        |> load_sleep_schedules()
-        |> put_flash(:error, "Failed to sleep #{name}: #{inspect(error)}")
-    end
+    socket =
+      case Drowzee.K8s.manual_sleep(sleep_schedule) do
+        {:ok, sleep_schedule} ->
+          # Note: Bit of a hack to make the UI update immediately rather than waiting for the controller to handle the ManualOverride action
+          sleep_schedule =
+            Drowzee.K8s.SleepSchedule.put_condition(
+              sleep_schedule,
+              "Transitioning",
+              "True",
+              "Sleeping",
+              "Going to sleep"
+            )
+
+          replace_sleep_schedule(socket, sleep_schedule)
+
+        {:error, error} ->
+          socket
+          |> load_sleep_schedules()
+          |> put_flash(:error, "Failed to sleep #{name}: #{inspect(error)}")
+      end
 
     {:noreply, socket}
   end
@@ -87,14 +111,16 @@ defmodule DrowzeeWeb.HomeLive.Index do
   def handle_event("remove_override", %{"name" => name, "namespace" => namespace}, socket) do
     sleep_schedule = Drowzee.K8s.get_sleep_schedule!(name, namespace)
 
-    socket = case Drowzee.K8s.remove_override(sleep_schedule) do
-      {:ok, sleep_schedule} ->
-        replace_sleep_schedule(socket, sleep_schedule)
-      {:error, error} ->
-        socket
-        |> load_sleep_schedules()
-        |> put_flash(:error, "Failed to sleep #{name}: #{inspect(error)}")
-    end
+    socket =
+      case Drowzee.K8s.remove_override(sleep_schedule) do
+        {:ok, sleep_schedule} ->
+          replace_sleep_schedule(socket, sleep_schedule)
+
+        {:error, error} ->
+          socket
+          |> load_sleep_schedules()
+          |> put_flash(:error, "Failed to sleep #{name}: #{inspect(error)}")
+      end
 
     {:noreply, socket}
   end
@@ -103,6 +129,7 @@ defmodule DrowzeeWeb.HomeLive.Index do
   def handle_event("toggle_enabled", %{"name" => name, "namespace" => namespace}, socket) do
     sleep_schedule = Drowzee.K8s.get_sleep_schedule!(name, namespace)
     new_enabled = not Map.get(sleep_schedule["spec"], "enabled", true)
+
     updated_sleep_schedule =
       put_in(sleep_schedule, ["spec", "enabled"], new_enabled)
       |> Drowzee.K8s.update_sleep_schedule()
@@ -110,59 +137,84 @@ defmodule DrowzeeWeb.HomeLive.Index do
         {:ok, s} -> s
         {:error, _} -> sleep_schedule
       end
+
     socket = replace_sleep_schedule(socket, updated_sleep_schedule)
     {:noreply, socket}
   end
 
   @impl true
-  def handle_event("sleep_all_schedules", %{"namespace" => namespace}, socket) when is_binary(namespace) do
+  def handle_event("sleep_all_schedules", %{"namespace" => namespace}, socket)
+      when is_binary(namespace) do
     sleep_schedules = Drowzee.K8s.sleep_schedules(namespace)
 
-    results = Enum.map(sleep_schedules, fn sleep_schedule ->
-      Drowzee.K8s.manual_sleep(sleep_schedule)
-    end)
+    results =
+      Enum.map(sleep_schedules, fn sleep_schedule ->
+        Drowzee.K8s.manual_sleep(sleep_schedule)
+      end)
 
     # Wait a second before reloading all the schedules
     Process.sleep(1000)
     socket = load_sleep_schedules(socket)
 
-    has_error = Enum.any?(results, fn {:error, _error} -> true; _ -> false end)
-    socket = if has_error, do: put_flash(socket, :error, "Failed to sleep at least one schedule"), else: socket
+    has_error =
+      Enum.any?(results, fn
+        {:error, _error} -> true
+        _ -> false
+      end)
+
+    socket =
+      if has_error,
+        do: put_flash(socket, :error, "Failed to sleep at least one schedule"),
+        else: socket
 
     {:noreply, socket}
   end
 
   @impl true
-  def handle_event("wake_all_schedules", %{"namespace" => namespace}, socket) when is_binary(namespace) do
+  def handle_event("wake_all_schedules", %{"namespace" => namespace}, socket)
+      when is_binary(namespace) do
     sleep_schedules = Drowzee.K8s.sleep_schedules(namespace)
 
-    results = Enum.map(sleep_schedules, fn sleep_schedule ->
-      Drowzee.K8s.manual_wake_up(sleep_schedule)
-    end)
+    results =
+      Enum.map(sleep_schedules, fn sleep_schedule ->
+        Drowzee.K8s.manual_wake_up(sleep_schedule)
+      end)
 
     # Wait a second before reloading all the schedules
     Process.sleep(1000)
     socket = load_sleep_schedules(socket)
 
-    has_error = Enum.any?(results, fn {:error, _error} -> true; _ -> false end)
-    socket = if has_error, do: put_flash(socket, :error, "Failed to wake up at least one schedule"), else: socket
+    has_error =
+      Enum.any?(results, fn
+        {:error, _error} -> true
+        _ -> false
+      end)
+
+    socket =
+      if has_error,
+        do: put_flash(socket, :error, "Failed to wake up at least one schedule"),
+        else: socket
 
     {:noreply, socket}
   end
 
   @impl true
   def handle_event("search", %{"search" => search}, socket) do
-    socket = socket
+    socket =
+      socket
       |> assign(:search, search)
       |> filter_sleep_schedules(search)
+
     {:noreply, socket}
   end
 
   @impl true
   def handle_event("clear_search", _, socket) do
-    socket = socket
+    socket =
+      socket
       |> assign(:search, "")
       |> assign(:filtered_sleep_schedules, nil)
+
     {:noreply, socket}
   end
 
@@ -176,10 +228,12 @@ defmodule DrowzeeWeb.HomeLive.Index do
 
   defp filter_sleep_schedules(socket, search) do
     search = String.downcase(search)
-    filtered_sleep_schedules = Enum.filter(socket.assigns.sleep_schedules, fn sleep_schedule ->
-      String.contains?(sleep_schedule["metadata"]["name"], search) ||
-      String.contains?(sleep_schedule["metadata"]["namespace"], search)
-    end)
+
+    filtered_sleep_schedules =
+      Enum.filter(socket.assigns.sleep_schedules, fn sleep_schedule ->
+        String.contains?(sleep_schedule["metadata"]["name"], search) ||
+          String.contains?(sleep_schedule["metadata"]["namespace"], search)
+      end)
 
     assign(socket, :filtered_sleep_schedules, filtered_sleep_schedules)
   end
@@ -192,55 +246,86 @@ defmodule DrowzeeWeb.HomeLive.Index do
   end
 
   defp load_sleep_schedules(socket) do
-    sleep_schedules = case socket.assigns.name do
-      nil ->
-        Drowzee.K8s.sleep_schedules(socket.assigns.namespace)
-      name ->
-        [Drowzee.K8s.get_sleep_schedule!(name, socket.assigns.namespace)]
-    end
-
-    {deployments_by_name, statefulsets_by_name, cronjobs_by_name} =
+    # Get all sleep schedules for the current namespace or specific schedule
+    {sleep_schedules, deployments_by_name, statefulsets_by_name, cronjobs_by_name} =
       case socket.assigns.name do
-        nil -> {%{}, %{}, %{}}
+        nil ->
+          schedules = Drowzee.K8s.sleep_schedules(socket.assigns.namespace)
+          {schedules, %{}, %{}, %{}}
+
         _name ->
+          schedules = Drowzee.K8s.sleep_schedules(socket.assigns.namespace)
+
           deployments =
-            sleep_schedules
+            schedules
             |> Enum.flat_map(fn schedule ->
               case Drowzee.K8s.SleepSchedule.get_deployments(schedule) do
                 {:ok, ds} -> ds
                 {:error, _} -> []
               end
             end)
+
           statefulsets =
-            sleep_schedules
+            schedules
             |> Enum.flat_map(fn schedule ->
               case Drowzee.K8s.SleepSchedule.get_statefulsets(schedule) do
                 {:ok, ss} -> ss
                 {:error, _} -> []
               end
             end)
+
           cronjobs =
-            sleep_schedules
+            schedules
             |> Enum.flat_map(fn schedule ->
               case Drowzee.K8s.SleepSchedule.get_cronjobs(schedule) do
                 {:ok, cs} -> cs
                 {:error, _} -> []
               end
             end)
+
           {
+            schedules,
             Map.new(deployments, &{&1["metadata"]["name"], &1}),
             Map.new(statefulsets, &{&1["metadata"]["name"], &1}),
             Map.new(cronjobs, &{&1["metadata"]["name"], &1})
           }
       end
 
+    # Handle namespace statuses based on the current view
+    # Use a single API call approach to improve performance
+    {all_namespaces, namespace_statuses, current_namespace_status} =
+      cond do
+        # On main page: fetch all schedules once and calculate everything
+        socket.assigns.namespace == nil ->
+          # Get all schedules for the main page (single API call)
+          all_schedules = Drowzee.K8s.sleep_schedules(nil)
+          
+          # Extract unique namespaces
+          namespaces =
+            all_schedules
+            |> Enum.map(fn schedule -> schedule["metadata"]["namespace"] end)
+            |> Enum.uniq()
+            |> Enum.sort()
+          
+          # Calculate all namespace statuses at once
+          {namespaces, calculate_namespace_statuses(all_schedules), nil}
+          
+        # On namespace page: we already have the schedules from above
+        true ->
+          # Reuse the already fetched schedules to calculate namespace status
+          # This avoids an additional API call
+          {[], %{}, calculate_namespace_status(sleep_schedules)}
+      end
+
     socket
     |> assign(:sleep_schedules, sleep_schedules)
+    |> assign(:all_namespaces, all_namespaces)
+    |> assign(:namespace_statuses, namespace_statuses)
+    |> assign(:current_namespace_status, current_namespace_status)
     |> assign(:deployments_by_name, deployments_by_name)
     |> assign(:statefulsets_by_name, statefulsets_by_name)
     |> assign(:cronjobs_by_name, cronjobs_by_name)
     |> filter_sleep_schedules(socket.assigns.search)
-
   end
 
   def sleep_schedule_host(sleep_schedule) do
@@ -257,15 +342,16 @@ defmodule DrowzeeWeb.HomeLive.Index do
 
   def last_transaction_time(sleep_schedule, type) do
     get_condition(sleep_schedule, type)["lastTransitionTime"]
-      |> Timex.parse!("{ISO:Extended}")
-      |> Timex.to_datetime(sleep_schedule["spec"]["timezone"])
-      |> Timex.format!("{h12}:{m}{am}")
+    |> Timex.parse!("{ISO:Extended}")
+    |> Timex.to_datetime(sleep_schedule["spec"]["timezone"])
+    |> Timex.format!("{h12}:{m}{am}")
   end
 
   def format_day_of_week(day_of_week) do
     cond do
       day_of_week in ["*", "", nil] ->
         "ALL DAYS"
+
       String.match?(day_of_week, ~r/^\d/) ->
         # Handle numeric format (0,6 or 1-5)
         day_of_week
@@ -284,20 +370,74 @@ defmodule DrowzeeWeb.HomeLive.Index do
         end)
         |> Enum.join(", ")
         |> String.replace(", ", "-", global: false)
+
       true ->
         # Handle text format (MON-FRI or SUN,SAT)
         String.upcase(day_of_week)
     end
   end
 
-  def replace_sleep_schedule(socket, updated_sleep_schedule) do
-    sleep_schedules = Enum.map(socket.assigns.sleep_schedules, fn sleep_schedule ->
-      if sleep_schedule["metadata"]["name"] == updated_sleep_schedule["metadata"]["name"] && sleep_schedule["metadata"]["namespace"] == updated_sleep_schedule["metadata"]["namespace"] do
-        updated_sleep_schedule
-      else
-        sleep_schedule
+  # Calculate the status for a single namespace based on its schedules
+  defp calculate_namespace_status([]), do: "disabled"
+  defp calculate_namespace_status(schedules) do
+    # Filter enabled schedules first - use pattern matching for better performance
+    enabled_schedules = Enum.reject(schedules, &(Map.get(&1["spec"], "enabled") == false))
+    
+    # Early return if no enabled schedules
+    if enabled_schedules == [] do
+      "disabled"
+    else
+      # Check sleeping status - use fast enumeration with early termination
+      # First check if any schedule is awake (not sleeping)
+      case Enum.find(enabled_schedules, fn schedule ->
+        get_condition(schedule, "Sleeping")["status"] != "True"
+      end) do
+        # If we found an awake schedule
+        %{} -> 
+          # Check if any schedule is sleeping
+          case Enum.find(enabled_schedules, fn schedule ->
+            get_condition(schedule, "Sleeping")["status"] == "True"
+          end) do
+            # If we found a sleeping schedule, it's mixed
+            %{} -> "mixed"
+            # If no sleeping schedules found, all are awake
+            nil -> "awake"
+          end
+        
+        # If we didn't find any awake schedule, all are sleeping
+        nil -> "sleeping"
       end
+    end
+  end
+
+  # Calculate the status of each namespace based on its schedules
+  defp calculate_namespace_statuses(schedules) do
+    # Group schedules by namespace - use for_reduce for better performance
+    schedules
+    |> Enum.reduce(%{}, fn schedule, acc ->
+      namespace = schedule["metadata"]["namespace"]
+      schedules_list = Map.get(acc, namespace, [])
+      Map.put(acc, namespace, [schedule | schedules_list])
     end)
+    |> Enum.map(fn {namespace, ns_schedules} ->
+      # Reuse the calculate_namespace_status function
+      {namespace, calculate_namespace_status(ns_schedules)}
+    end)
+    |> Map.new()
+  end
+
+  def replace_sleep_schedule(socket, updated_sleep_schedule) do
+    sleep_schedules =
+      Enum.map(socket.assigns.sleep_schedules, fn sleep_schedule ->
+        if sleep_schedule["metadata"]["name"] == updated_sleep_schedule["metadata"]["name"] &&
+             sleep_schedule["metadata"]["namespace"] ==
+               updated_sleep_schedule["metadata"]["namespace"] do
+          updated_sleep_schedule
+        else
+          sleep_schedule
+        end
+      end)
+
     assign(socket, :sleep_schedules, sleep_schedules)
   end
 end
