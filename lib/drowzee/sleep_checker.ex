@@ -129,12 +129,20 @@ defmodule Drowzee.SleepChecker do
   end
 
   defp parse_time(time_str, date, timezone) do
-    case Timex.parse(time_str, "%-I:%M%p", :strftime) do
+    # Try 24-hour format first (HH:MM)
+    case Timex.parse(time_str, "%H:%M", :strftime) do
       {:ok, time} ->
         datetime = DateTime.new!(date, Time.new!(time.hour, time.minute, 0), timezone)
         {:ok, datetime}
-      {:error, error} ->
-        {:error, error}
+      {:error, _} ->
+        # Fall back to 12-hour format with AM/PM (H:MMAM/PM)
+        case Timex.parse(time_str, "%-I:%M%p", :strftime) do
+          {:ok, time} ->
+            datetime = DateTime.new!(date, Time.new!(time.hour, time.minute, 0), timezone)
+            {:ok, datetime}
+          {:error, error} ->
+            {:error, error}
+        end
     end
   end
 

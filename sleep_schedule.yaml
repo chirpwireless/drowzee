@@ -30,6 +30,22 @@ spec:
 apiVersion: drowzee.challengr.io/v1beta1
 kind: SleepSchedule
 metadata:
+  name: 24h-format
+spec:
+  sleepTime: "22:00"
+  wakeTime: "09:00"
+  dayOfWeek: "*"
+  timezone: "Australia/Sydney"
+  deployments:
+    - name: service2
+    - name: service2-worker
+  cronjobs:
+    - name: service2-backup
+  ingressName: service2
+---
+apiVersion: drowzee.challengr.io/v1beta1
+kind: SleepSchedule
+metadata:
   name: permanent-down
 spec:
   sleepTime: "08:00pm"
