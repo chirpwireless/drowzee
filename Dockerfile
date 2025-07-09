@@ -2,7 +2,7 @@
 ###### Build Image ######
 #########################
 
-FROM elixir:1.18 AS builder
+FROM elixir:1.18.3 AS builder
 
 ENV MIX_ENV=prod \
   MIX_HOME=/opt/mix \
@@ -40,7 +40,7 @@ RUN mix release
 ##### Release Image #####
 #########################
 
-FROM elixir:1.18-slim
+FROM elixir:1.18.3-slim
 
 # set runner ENV
 ENV MIX_ENV=prod

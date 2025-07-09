@@ -194,21 +194,24 @@ defmodule Drowzee.Controller.SleepScheduleController do
         {:sleeping, :no_transition, :wake_up_override, _} ->
           initiate_wake_up(axn)
 
-        # Preserve all manual overrides until explicitly removed
-        {:awake, :no_transition, :wake_up_override, :not_naptime} ->
-          Logger.debug("Preserving manual wake-up override")
-          axn
+        # Auto-remove manual override when schedule state matches override state
+        {:sleeping, :no_transition, :sleep_override, :naptime} ->
+          Logger.info("Auto-removing sleep override as schedule is now naturally in sleep state")
+          remove_manual_override(axn)
 
-        # When a schedule is awake with a wake-up override and it's past sleep time,
-        # we respect the manual override and do nothing
+        {:awake, :no_transition, :wake_up_override, :not_naptime} ->
+          Logger.info("Auto-removing wake-up override as schedule is now naturally in wake state")
+          remove_manual_override(axn)
+
+        # Preserve manual overrides when schedule state differs from override state
         {:awake, :no_transition, :wake_up_override, :naptime} ->
           Logger.info("Sleep time reached but respecting manual wake-up override")
           axn
 
-        # When a schedule is sleeping with a sleep override and it's naptime,
+        # When a schedule is sleeping with a sleep override and it's not naptime,
         # we respect the manual override and do nothing
-        {:sleeping, :no_transition, :sleep_override, :naptime} ->
-          Logger.debug("Sleep time reached but respecting manual sleep override")
+        {:sleeping, :no_transition, :sleep_override, :not_naptime} ->
+          Logger.debug("Wake time reached but respecting manual sleep override")
           axn
 
         # Trigger scheduled actions
@@ -575,6 +578,23 @@ defmodule Drowzee.Controller.SleepScheduleController do
           name: SleepSchedule.ingress_name(axn.resource)
         )
 
+        axn
+    end
+  end
+
+  # Helper function to remove manual override
+  defp remove_manual_override(%Bonny.Axn{} = axn) do
+    sleep_schedule = axn.resource
+
+    # Call the K8s module to remove the override
+    case Drowzee.K8s.remove_override(sleep_schedule) do
+      {:ok, _updated} ->
+        # Return the original axn to continue processing
+        # The override removal will trigger a new event
+        axn
+
+      {:error, error} ->
+        Logger.error("Failed to remove manual override", error: inspect(error))
         axn
     end
   end
