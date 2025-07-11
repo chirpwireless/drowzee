@@ -14,6 +14,9 @@ defmodule Drowzee.Metrics do
   # Define metrics
   @doc "Initialize all metrics"
   def setup do
+    # Initialize metrics for existing sleep schedules
+    initialize_metrics_for_existing_schedules()
+
     # Counter for manual starts of sleep schedules
     Counter.declare(
       name: :drowzee_sleep_schedule_manual_starts_total,
@@ -214,22 +217,111 @@ defmodule Drowzee.Metrics do
 
     case :ets.lookup(:drowzee_schedule_state, {namespace, name, :last_update}) do
       [{{^namespace, ^name, :last_update}, last_update}] ->
-        # Calculate time since last update
-        current_time - last_update
+        # Calculate time since last update (actual elapsed seconds)
+        elapsed_seconds = current_time - last_update
+        elapsed_seconds
 
       [] ->
         # No last update, use wake time
         case :ets.lookup(:drowzee_schedule_state, {namespace, name, :wake_time}) do
-          [{{^namespace, ^name, :wake_time}, _wake_time}] ->
+          [{{^namespace, ^name, :wake_time}, wake_time}] ->
+            # Calculate time since wake time
+            elapsed_seconds = current_time - wake_time
+
             # Initialize last update time
             :ets.insert(:drowzee_schedule_state, {{namespace, name, :last_update}, current_time})
-            # Return a small initial value to avoid large jumps on first update
-            1
+
+            # Return the actual elapsed time
+            elapsed_seconds
 
           [] ->
             # No wake time either, return 0
             0
         end
+    end
+  end
+
+  # Initialize metrics for existing sleep schedules
+  defp initialize_metrics_for_existing_schedules do
+    try do
+      # Get all sleep schedules from Kubernetes
+      case Bonny.API.list("drowzee.io", "v1alpha1", "sleepschedules") do
+        {:ok, %{"items" => items}} when is_list(items) ->
+          Logger.info("Initializing metrics for #{length(items)} existing sleep schedules")
+
+          Enum.each(items, fn schedule ->
+            namespace = schedule["metadata"]["namespace"]
+            name = schedule["metadata"]["name"]
+
+            # Initialize counters with zero to make them appear in metrics
+            Counter.declare_value(
+              name: :drowzee_sleep_schedule_manual_starts_total,
+              labels: [namespace, name],
+              value: 0
+            )
+
+            Counter.declare_value(
+              name: :drowzee_sleep_schedule_manual_stops_total,
+              labels: [namespace, name],
+              value: 0
+            )
+
+            Counter.declare_value(
+              name: :drowzee_sleep_schedule_uptime_seconds_total,
+              labels: [namespace, name],
+              value: 0
+            )
+
+            # Initialize state gauge based on current status
+            is_sleeping =
+              case schedule["status"] do
+                %{"conditions" => conditions} when is_list(conditions) ->
+                  Enum.any?(conditions, fn condition ->
+                    condition["type"] == "Sleeping" && condition["status"] == "True"
+                  end)
+                _ -> false
+              end
+
+            state_value = if is_sleeping, do: 0, else: 1
+
+            Gauge.set(
+              name: :drowzee_sleep_schedule_state,
+              labels: [namespace, name],
+              value: state_value
+            )
+
+            # If awake, start tracking uptime
+            if state_value == 1 do
+              # For existing awake schedules, set the wake time to now
+              # This will start tracking uptime from application start
+              current_time = :os.system_time(:second)
+              :ets.insert(:drowzee_schedule_state, {{namespace, name, :wake_time}, current_time})
+
+              # Also set the last update time to the same value to avoid large initial jumps
+              :ets.insert(:drowzee_schedule_state, {{namespace, name, :last_update}, current_time})
+
+              # Force an initial update to make the metric appear
+              Counter.inc(
+                name: :drowzee_sleep_schedule_uptime_seconds_total,
+                labels: [namespace, name],
+                value: 1  # Start with a small value
+              )
+
+              Logger.debug("Started tracking uptime for active schedule #{namespace}/#{name}")
+            end
+
+            Logger.debug("Initialized metrics for schedule #{namespace}/#{name}, state: #{state_value}")
+          end)
+
+        {:ok, _} ->
+          Logger.debug("No sleep schedules found for metrics initialization")
+
+        {:error, reason} ->
+          Logger.error("Failed to list sleep schedules for metrics initialization: #{inspect(reason)}")
+      end
+    rescue
+      e ->
+        Logger.error("Error initializing metrics for existing schedules: #{inspect(e)}")
     end
   end
 end
