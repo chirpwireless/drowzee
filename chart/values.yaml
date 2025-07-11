@@ -96,6 +96,24 @@ ingress:
   #    hosts:
   #      - chart-example.local
 
+# Prometheus metrics configuration
+metrics:
+  # ServiceMonitor configuration for Prometheus Operator
+  serviceMonitor:
+    # Enable ServiceMonitor resource creation
+    enabled: false
+    # Optional namespace where ServiceMonitor will be created
+    # If not specified, the release namespace will be used
+    namespace: ""
+    # Interval at which metrics should be scraped
+    interval: 30s
+    # Timeout for scrape requests
+    scrapeTimeout: 10s
+    # Additional labels for the ServiceMonitor
+    additionalLabels:
+      {}
+      # release: prometheus
+
 resources:
   {}
   # We usually recommend not to specify default resources and to leave this as a conscious

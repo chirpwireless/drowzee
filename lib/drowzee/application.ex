@@ -10,6 +10,9 @@ defmodule Drowzee.Application do
     # We no longer initialize the coordinator directly here as it's managed by the supervisor
     # Drowzee.Controller.SleepScheduleController.start_coordinator()
 
+    # Initialize Prometheus metrics
+    Drowzee.Metrics.setup()
+
     children = [
       DrowzeeWeb.Telemetry,
       {DNSCluster, query: Application.get_env(:drowzee, :dns_cluster_query) || :ignore},
@@ -19,6 +22,9 @@ defmodule Drowzee.Application do
 
       # Add the CoordinatorSupervisor to manage the scaling coordinator
       Drowzee.CoordinatorSupervisor,
+
+      # Add the MetricsUpdater to periodically update metrics
+      Drowzee.MetricsUpdater,
 
       # Start to serve requests, typically the last entry
       DrowzeeWeb.Endpoint

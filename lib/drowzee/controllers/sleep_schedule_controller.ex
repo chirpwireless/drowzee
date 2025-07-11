@@ -7,6 +7,7 @@ defmodule Drowzee.Controller.SleepScheduleController do
   import Drowzee.Axn
   require Logger
   alias Drowzee.K8s.{SleepSchedule, Ingress, Deployment, StatefulSet, CronJob}
+  alias Drowzee.Metrics
 
   step(Bonny.Pluggable.SkipObservedGenerations)
   step(:handle_event)
@@ -189,9 +190,15 @@ defmodule Drowzee.Controller.SleepScheduleController do
       case {sleeping_value, transitioning_value, manual_override_value, naptime} do
         # Trigger action from manual override
         {:awake, :no_transition, :sleep_override, _} ->
+          namespace = axn.resource["metadata"]["namespace"]
+          name = axn.resource["metadata"]["name"]
+          Metrics.record_manual_stop(namespace, name)
           initiate_sleep(axn)
 
         {:sleeping, :no_transition, :wake_up_override, _} ->
+          namespace = axn.resource["metadata"]["namespace"]
+          name = axn.resource["metadata"]["name"]
+          Metrics.record_manual_start(namespace, name)
           initiate_wake_up(axn)
 
         # Preserve all manual overrides until explicitly removed
@@ -213,9 +220,15 @@ defmodule Drowzee.Controller.SleepScheduleController do
 
         # Trigger scheduled actions
         {:awake, :no_transition, :no_override, :naptime} ->
+          namespace = axn.resource["metadata"]["namespace"]
+          name = axn.resource["metadata"]["name"]
+          Metrics.record_scheduled_stop(namespace, name)
           initiate_sleep(axn)
 
         {:sleeping, :no_transition, :no_override, :not_naptime} ->
+          namespace = axn.resource["metadata"]["namespace"]
+          name = axn.resource["metadata"]["name"]
+          Metrics.record_scheduled_start(namespace, name)
           initiate_wake_up(axn)
 
         # Await transitions (could be moved to background process)
@@ -521,6 +534,19 @@ defmodule Drowzee.Controller.SleepScheduleController do
     Logger.info("Wake up transition complete")
     manual_override = Keyword.get(opts, :manual_override, false)
     wake_reason = if manual_override, do: "ManualWakeUp", else: "ScheduledWakeUp"
+
+    namespace = axn.resource["metadata"]["namespace"]
+    name = axn.resource["metadata"]["name"]
+
+    # Start tracking uptime for the schedule
+    if manual_override do
+      # For manual wake-ups, we've already recorded the start time
+      # Just ensure the uptime metric is updated
+      Metrics.update_uptime(namespace, name)
+    else
+      # For scheduled wake-ups, record the start time now
+      Metrics.record_scheduled_start(namespace, name)
+    end
 
     axn
     |> set_condition("Transitioning", false, "NoTransition", "No transition in progress")
