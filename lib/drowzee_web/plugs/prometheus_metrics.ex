@@ -4,7 +4,7 @@ defmodule DrowzeeWeb.Plugs.PrometheusMetrics do
   """
 
   import Plug.Conn
-  use Prometheus.Plug
+  require Prometheus.Format.Text
 
   def init(opts), do: opts
 

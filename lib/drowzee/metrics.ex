@@ -157,7 +157,7 @@ defmodule Drowzee.Metrics do
   def update_uptime(namespace, name) do
     try do
       case :ets.lookup(:drowzee_schedule_state, {namespace, name, :wake_time}) do
-        [{{^namespace, ^name, :wake_time}, wake_time}] ->
+        [{{^namespace, ^name, :wake_time}, _wake_time}] ->
           current_time = :os.system_time(:second)
           time_since_last_update = get_time_since_last_update(namespace, name)
 
@@ -186,7 +186,7 @@ defmodule Drowzee.Metrics do
   # Private function to update uptime when a schedule goes to sleep
   defp update_uptime_on_sleep(namespace, name) do
     case :ets.lookup(:drowzee_schedule_state, {namespace, name, :wake_time}) do
-      [{{^namespace, ^name, :wake_time}, wake_time}] ->
+      [{{^namespace, ^name, :wake_time}, _wake_time}] ->
         current_time = :os.system_time(:second)
         time_since_last_update = get_time_since_last_update(namespace, name)
 
@@ -220,7 +220,7 @@ defmodule Drowzee.Metrics do
       [] ->
         # No last update, use wake time
         case :ets.lookup(:drowzee_schedule_state, {namespace, name, :wake_time}) do
-          [{{^namespace, ^name, :wake_time}, wake_time}] ->
+          [{{^namespace, ^name, :wake_time}, _wake_time}] ->
             # Initialize last update time
             :ets.insert(:drowzee_schedule_state, {{namespace, name, :last_update}, current_time})
             # Return a small initial value to avoid large jumps on first update

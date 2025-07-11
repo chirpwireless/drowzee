@@ -59,7 +59,8 @@ defmodule Drowzee.MixProject do
       {:bonny, "~> 1.0"},
       {:timex, "~> 3.7"},
       {:crontab, "~> 1.1"},
-      {:prometheus_ex, "~> 3.0"}
+      {:prometheus_ex, "~> 3.0"},
+      {:prometheus_plugs, "~> 1.1"}
     ]
   end
 
