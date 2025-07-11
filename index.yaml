@@ -1,0 +1,54 @@
+apiVersion: v1
+entries:
+  drowzee:
+  - apiVersion: v2
+    appVersion: 2025.711.112024-ad103f4-feat-add-monitoring
+    created: "2025-07-11T11:22:10.501571395Z"
+    description: A Helm chart for the Drowzee operator
+    digest: b4747939f3715c2a3f26102b1b0dc50b88d50d810388c3b45bd44cc9363cd6c0
+    name: drowzee
+    type: application
+    urls:
+    - https://chirpwireless.github.io/drowzee/drowzee-1.2.0-2025.711.112024-ad103f4-feat-add-monitoring.tgz
+    version: 1.2.0-2025.711.112024-ad103f4-feat-add-monitoring
+  - apiVersion: v2
+    appVersion: 2025.711.105850-afe6c15-feat-add-monitoring
+    created: "2025-07-11T11:22:10.501060468Z"
+    description: A Helm chart for the Drowzee operator
+    digest: 1a2e517ef182d8974a552d9945daba46afb715cf43e59cd40b3d5a3ce01c85d1
+    name: drowzee
+    type: application
+    urls:
+    - https://chirpwireless.github.io/drowzee/drowzee-1.2.0-2025.711.105850-afe6c15-feat-add-monitoring.tgz
+    version: 1.2.0-2025.711.105850-afe6c15-feat-add-monitoring
+  - apiVersion: v2
+    appVersion: 2025.79.183612-6642e08
+    created: "2025-07-11T11:22:10.500552686Z"
+    description: A Helm chart for the Drowzee operator
+    digest: a95f993369fe04703de6adb479869b6e6699a97c46b08e1dead90da178618855
+    name: drowzee
+    type: application
+    urls:
+    - https://chirpwireless.github.io/drowzee/drowzee-1.1.0.tgz
+    version: 1.1.0
+  - apiVersion: v2
+    appVersion: 2025.626.95835-995dcdf
+    created: "2025-07-11T11:22:10.500085711Z"
+    description: A Helm chart for the Drowzee operator
+    digest: 2e3f13612396b5606f7d86504954fd008d85495cbf7ff28fa8d2cb52bf1babdc
+    name: drowzee
+    type: application
+    urls:
+    - https://chirpwireless.github.io/drowzee/drowzee-1.0.0.tgz
+    version: 1.0.0
+  - apiVersion: v2
+    appVersion: 2025.626.94817-a63fb14
+    created: "2025-07-11T11:22:10.499603447Z"
+    description: A Helm chart for the Drowzee operator
+    digest: f2d0f1112d2fc11a920d81c72e80079b111f84b030ae7559c38d5e75e1f31dee
+    name: drowzee
+    type: application
+    urls:
+    - https://chirpwireless.github.io/drowzee/drowzee-0.2.0.tgz
+    version: 0.2.0
+generated: "2025-07-11T11:22:10.49898063Z"
