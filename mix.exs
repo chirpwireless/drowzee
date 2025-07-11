@@ -59,7 +59,9 @@ defmodule Drowzee.MixProject do
       {:bonny, "~> 1.0"},
       {:timex, "~> 3.7"},
       {:crontab, "~> 1.1"},
-      {:prometheus_ex, "~> 3.0"}
+      {:prometheus_ex, "~> 3.0"},
+      # Override the inflex dependency to fix compatibility with Elixir 1.18
+      {:inflex, "~> 2.1.0", override: true}
     ]
   end
 
