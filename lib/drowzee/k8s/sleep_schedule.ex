@@ -428,7 +428,7 @@ defmodule Drowzee.K8s.SleepSchedule do
     Logger.debug("Suspending cronjobs...")
 
     # Create a function that suspends a cronjob
-    suspend_func = fn cronjob -> CronJob.suspend_cronjob(cronjob, true) end
+    suspend_func = fn cronjob -> CronJob.suspend(cronjob, true) end
 
     case get_cronjobs(sleep_schedule) do
       {:ok, cronjobs} ->
@@ -462,7 +462,7 @@ defmodule Drowzee.K8s.SleepSchedule do
     Logger.debug("Resuming cronjobs...")
 
     # Create a function that resumes a cronjob
-    resume_func = fn cronjob -> CronJob.suspend_cronjob(cronjob, false) end
+    resume_func = fn cronjob -> CronJob.suspend(cronjob, false) end
 
     case get_cronjobs(sleep_schedule) do
       {:ok, cronjobs} ->
