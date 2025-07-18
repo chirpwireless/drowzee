@@ -64,28 +64,45 @@ defmodule Drowzee.K8s.CronJob do
     # First check if the CronJob is already in the desired state
     operation = if suspend, do: :suspend, else: :resume
 
+    Logger.debug("CronJob suspend operation",
+      name: name(cronjob),
+      operation: operation,
+      current_suspend: get_in(cronjob, ["spec", "suspend"]) || false
+    )
+
+    # Save original state before suspend operations (not resume)
+    if suspend do
+      Logger.debug("Saving original state before suspend", name: name(cronjob))
+      case save_original_state(cronjob) do
+        {:ok, _updated_cronjob} ->
+          Logger.debug("Original state saved successfully", name: name(cronjob))
+        {:error, reason} ->
+          Logger.warning("Failed to save original state: #{inspect(reason)}", name: name(cronjob))
+      end
+    end
+
     case Drowzee.K8s.ResourceUtils.check_resource_state(cronjob, operation) do
       {:already_in_desired_state, cronjob} ->
         # Already in the desired state, return success
+        Logger.debug("CronJob already in desired state",
+          name: name(cronjob),
+          operation: operation
+        )
         {:ok, cronjob}
 
       {:needs_modification, cronjob} ->
         if suspend do
-          # When suspending, save the original state first if not already saved
-          case save_original_state(cronjob) do
-            {:ok, cronjob_with_original} ->
-              do_suspend(cronjob_with_original, true)
-
-            {:error, reason} ->
-              Logger.error("Failed to save original state before suspending: #{inspect(reason)}",
-                name: name(cronjob)
-              )
-              # Continue with suspend operation even if saving original state failed
-              do_suspend(cronjob, true)
-          end
+          # When suspending, just do the suspend operation (original state already saved)
+          Logger.debug("Suspending CronJob", name: name(cronjob))
+          do_suspend(cronjob, true)
         else
           # When resuming, check if the original state was suspended
           original_suspend = get_original_state(cronjob)
+
+          Logger.debug("Resuming CronJob, checking original state",
+            name: name(cronjob),
+            original_suspend: original_suspend
+          )
 
           if original_suspend do
             # The CronJob was originally suspended by the user, don't resume it
@@ -96,6 +113,9 @@ defmodule Drowzee.K8s.CronJob do
             {:ok, cronjob}
           else
             # The CronJob was originally not suspended, safe to resume
+            Logger.debug("CronJob was not originally suspended, proceeding with resume",
+              name: name(cronjob)
+            )
             do_suspend(cronjob, false)
           end
         end
