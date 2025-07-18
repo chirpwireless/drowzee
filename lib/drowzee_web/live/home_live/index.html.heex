@@ -390,6 +390,11 @@
 
           <div class="text-gray-600 mt-4">
             🕒 <strong>Schedule:</strong>
+            <%= if sleep_schedule["spec"]["onDemand"] do %>
+              <span class="px-2 py-0.5 bg-blue-50 text-blue-800 rounded-md font-medium ml-2">
+                ON-DEMAND
+              </span>
+            <% end %>
             <div class="mt-2 bg-gray-50 p-3 rounded-lg border border-gray-200 shadow-sm">
               <div class="flex items-center mb-2">
                 <span class="px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs mr-2">
@@ -407,11 +412,6 @@
                     {sleep_schedule["spec"]["wakeTime"]} - {sleep_schedule["spec"]["sleepTime"]}
                   <% end %>
                 </span>
-                <%= if sleep_schedule["spec"]["onDemand"] do %>
-                  <span class="px-2 py-0.5 bg-purple-50 text-purple-700 rounded-md font-medium ml-2">
-                    ON-DEMAND
-                  </span>
-                <% end %>
               </div>
 
               <div class="flex items-center">
@@ -425,16 +425,16 @@
             <div class="text-gray-600 mt-4">
               🔗 <strong>Dependencies:</strong>
               <div class="mt-2 bg-amber-50 p-3 rounded-lg border border-amber-200 shadow-sm">
-                <div class="text-sm text-amber-800 mb-2">
+                <div class="text-sm text-black mb-2">
                   This schedule will wake up the following dependencies first during manual wake-up:
                 </div>
                 <div class="space-y-1">
                   <%= for need <- sleep_schedule["spec"]["needs"] do %>
                     <div class="flex items-center">
-                      <span class="px-2 py-0.5 bg-amber-100 text-amber-800 rounded-full text-xs mr-2">
+                      <span class="px-2 py-0.5 bg-amber-100 text-black rounded-full text-xs mr-2">
                         🎯 {need["namespace"]}/{need["name"]}
                       </span>
-                      <span class="text-amber-600 text-xs">
+                      <span class="text-black text-xs">
                         <%= case Drowzee.K8s.get_sleep_schedule(need["name"], need["namespace"]) do %>
                           <% {:ok, dep_schedule} -> %>
                             <%= if get_condition(dep_schedule, "Sleeping")["status"] == "True" do %>
@@ -488,8 +488,8 @@
                   <!-- Check if this schedule has dependencies that might have been woken up -->
                   <%= if (sleep_schedule["spec"]["needs"] || []) != [] do %>
                     <div class="bg-blue-50 p-2 rounded border border-blue-200">
-                      <span class="text-blue-800">
-                        ℹ️ <strong>Note:</strong> This schedule has dependencies that were also woken up automatically.
+                      <span class="text-black">
+                        <strong>Note:</strong> This schedule has dependencies that were also woken up automatically.
                       </span>
                     </div>
                   <% end %>
@@ -507,13 +507,13 @@
                   end) %>
                   
                   <%= if not Enum.empty?(manually_woken_dependents) do %>
-                    <div class="bg-amber-50 p-2 rounded border border-amber-200 mt-2">
-                      <span class="text-amber-800">
+                    <div class="bg-blue-50 p-2 rounded border border-blue-200 mt-2">
+                      <span class="text-black">
                         🔗 <strong>Dependency:</strong> This schedule might have been woken up as a dependency of:
                       </span>
                       <div class="mt-1 space-y-1">
                         <%= for dep_key <- manually_woken_dependents do %>
-                          <div class="text-xs text-amber-700">
+                          <div class="text-xs text-black">
                             • {dep_key}
                           </div>
                         <% end %>
