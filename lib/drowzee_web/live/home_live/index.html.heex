@@ -455,16 +455,32 @@
 
           <%= if get_condition(sleep_schedule, "ManualOverride")["status"] == "True" do %>
             <div class="text-gray-600 mt-2">
-              🛑 <strong>Manual override:</strong>
-              <span>
-                {case get_condition(sleep_schedule, "ManualOverride")["reason"] do
-                  "Sleep" -> "Put to sleep "
-                  "WakeUp" -> "Woken up "
-                  _ -> "Manual override"
-                end} at {last_transaction_time(sleep_schedule, "ManualOverride")} ({sleep_schedule[
-                  "spec"
-                ]["timezone"]})
-              </span>
+              <div class="flex items-center justify-between">
+                <div>
+                  🛑 <strong>Manual override:</strong>
+                  <span>
+                    {case get_condition(sleep_schedule, "ManualOverride")["reason"] do
+                      "Sleep" -> "Put to sleep "
+                      "WakeUp" -> "Woken up "
+                      _ -> "Manual override"
+                    end} at {last_transaction_time(sleep_schedule, "ManualOverride")} ({sleep_schedule[
+                      "spec"
+                    ]["timezone"]})
+                  </span>
+                </div>
+                <div>
+                  <.link
+                    phx-click="remove_override"
+                    phx-value-name={sleep_schedule["metadata"]["name"]}
+                    phx-value-namespace={sleep_schedule["metadata"]["namespace"]}
+                    class="px-2 py-1 text-sm text-gray-600 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                    phx-disable-with="removing..."
+                    title="Remove manual override"
+                  >
+                    <span class="inline-block w-4 h-4 text-gray-600 hero-trash"></span>
+                  </.link>
+                </div>
+              </div>
               
               <!-- Show additional context for dependency relationships -->
               <%= if get_condition(sleep_schedule, "ManualOverride")["reason"] == "WakeUp" do %>
@@ -506,18 +522,6 @@
                   <% end %>
                 </div>
               <% end %>
-              
-              <span>
-                <.link
-                  phx-click="remove_override"
-                  phx-value-name={sleep_schedule["metadata"]["name"]}
-                  phx-value-namespace={sleep_schedule["metadata"]["namespace"]}
-                  class="px-4 py-2 text-sm text-gray-600 hover:underline disabled:text-gray-300 disabled:cursor-not-allowed"
-                  phx-disable-with="removing..."
-                >
-                  <span class="inline-block mb-1 w-4 h-4 text-gray-600 hero-trash"></span>
-                </.link>
-              </span>
             </div>
           <% end %>
 
