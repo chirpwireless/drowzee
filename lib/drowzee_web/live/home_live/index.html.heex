@@ -400,13 +400,16 @@
 
               <div class="flex items-center mb-2">
                 <span class="font-medium text-gray-700 mr-2">Working hours:</span>
-                <%= if sleep_schedule["spec"]["wakeTime"] do %>
-                  <span class="px-2 py-0.5 bg-green-50 text-green-700 rounded-md">
+                <span class="px-2 py-0.5 bg-green-50 text-green-700 rounded-md">
+                  <%= if sleep_schedule["spec"]["onDemand"] do %>
+                    Manual wake - {sleep_schedule["spec"]["sleepTime"]}
+                  <% else %>
                     {sleep_schedule["spec"]["wakeTime"]} - {sleep_schedule["spec"]["sleepTime"]}
-                  </span>
-                <% else %>
-                  <span class="px-2 py-0.5 bg-red-50 text-red-700 rounded-md font-medium">
-                    Until {sleep_schedule["spec"]["sleepTime"]} (MANUAL WAKE)
+                  <% end %>
+                </span>
+                <%= if sleep_schedule["spec"]["onDemand"] do %>
+                  <span class="px-2 py-0.5 bg-purple-50 text-purple-700 rounded-md font-medium ml-2">
+                    ON-DEMAND
                   </span>
                 <% end %>
               </div>

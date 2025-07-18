@@ -219,7 +219,14 @@ defmodule Drowzee.Controller.SleepScheduleController do
           initiate_sleep(axn)
 
         {:sleeping, :no_transition, :no_override, :not_naptime} ->
-          initiate_wake_up(axn)
+          # Check if this is an on-demand schedule
+          on_demand = get_in(axn.resource, ["spec", "onDemand"]) || false
+          if on_demand do
+            Logger.info("Skipping auto-wake for on-demand schedule")
+            axn
+          else
+            initiate_wake_up(axn)
+          end
 
         # Await transitions (could be moved to background process)
         {:awake, :transition, _, _} ->

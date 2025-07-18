@@ -50,61 +50,90 @@ defmodule Drowzee.API.V1Beta1.SleepSchedule do
           properties: %{
             spec: %{
               type: :object,
+              required: [:sleepTime, :wakeTime, :timezone, :deployments],
               properties: %{
                 enabled: %{
                   type: :boolean,
-                  description: "Whether this schedule is enabled.",
+                  description: "Whether the schedule is enabled",
                   default: true
                 },
                 deployments: %{
-                  description: "The deployments that will be slept/woken.",
                   type: :array,
+                  description: "The deployments that will be slept/woken.",
                   items: %{
                     type: :object,
+                    required: [:name],
                     properties: %{
-                      name: %{
-                        type: :string
-                      }
-                    },
-                    required: [:name]
+                      name: %{type: :string}
+                    }
                   }
                 },
+                statefulsets: %{
+                  type: :array,
+                  description: "The statefulsets that will be slept/woken.",
+                  items: %{
+                    type: :object,
+                    required: [:name],
+                    properties: %{
+                      name: %{type: :string}
+                    }
+                  }
+                },
+                cronjobs: %{
+                  type: :array,
+                  description: "The cronjobs that will be suspended/resumed.",
+                  items: %{
+                    type: :object,
+                    required: [:name],
+                    properties: %{
+                      name: %{type: :string}
+                    }
+                  }
+                },
+                needs: %{
+                  type: :array,
+                  description: "List of other SleepSchedules that this schedule depends on. Dependencies will be woken up first during manual wake-up operations.",
+                  items: %{
+                    type: :object,
+                    required: [:name, :namespace],
+                    properties: %{
+                      name: %{
+                        type: :string,
+                        description: "Name of the dependency SleepSchedule"
+                      },
+                      namespace: %{
+                        type: :string,
+                        description: "Namespace of the dependency SleepSchedule"
+                      }
+                    }
+                  }
+                },
+                ingressName: %{
+                  type: :string,
+                  description: "The ingress that will be slept/woken."
+                },
                 sleepTime: %{
-                  description: "The time that the deployment will start sleeping(format: HH:MMam/pm)",
-                  type: :string
+                  type: :string,
+                  description: "The time that the deployment will start sleeping (format: HH:MM for 24h or H:MMam/pm for 12h)"
                 },
                 wakeTime: %{
-                  description: "The time that the deployment will wake up (format: HH:MMam/pm)",
+                  type: :string,
+                  description: "The time that the deployment will wake up (format: HH:MM for 24h or H:MMam/pm for 12h)"
+                },
+                onDemand: %{
+                  type: :boolean,
+                  description: "If true, the schedule will not automatically wake up at wakeTime but will still auto-sleep at sleepTime. Manual overrides are still auto-removed at scheduled times. If false (default), schedule works normally with auto-wake and auto-sleep.",
+                  default: false
+                },
+                dayOfWeek: %{
+                  description: "The day of the week that the deployment will start sleeping",
                   type: :string
                 },
                 timezone: %{
                   description: "The timezone that the input times are based in",
                   type: :string
-                },
-                ingressName: %{
-                  description: "The ingress that will be slept/woken.",
-                  type: :string
-                },
-                needs: %{
-                  description: "List of SleepSchedules that must be woken up before this schedule during manual wake-up operations. Only schedules without their own 'needs' can be dependencies.",
-                  type: :array,
-                  items: %{
-                    type: :object,
-                    properties: %{
-                      name: %{
-                        type: :string,
-                        description: "Name of the SleepSchedule dependency"
-                      },
-                      namespace: %{
-                        type: :string,
-                        description: "Namespace of the SleepSchedule dependency"
-                      }
-                    },
-                    required: [:name, :namespace]
-                  }
                 }
-              },
-              required: [:sleepTime, :timezone, :wakeTime, :deployments]
+              }
             }
           }
         }
@@ -118,6 +147,7 @@ defmodule Drowzee.API.V1Beta1.SleepSchedule do
         %{name: "Statefulsets", type: :string, description: "Statefulsets", jsonPath: ".spec.statefulsets[*].name"},
         %{name: "Cronjobs", type: :string, description: "CronJobs", jsonPath: ".spec.cronjobs[*].name"},
         %{name: "Needs", type: :string, description: "Dependencies", jsonPath: ".spec.needs[*].name"},
+        %{name: "OnDemand", type: :string, description: "On Demand", jsonPath: ".spec.onDemand"},
         %{name: "Sleeping?", type: :string, description: "Current Status", jsonPath: ".status.conditions[?(@.type == \"Sleeping\")].status"},
         %{name: "Transitioning?", type: :string, description: "Status Change In Progress", jsonPath: ".status.conditions[?(@.type == \"Transitioning\")].status"},
         %{name: "ManualOverride?", type: :string, description: "Status overridden by user", jsonPath: ".status.conditions[?(@.type == \"ManualOverride\")].status"}
