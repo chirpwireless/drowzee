@@ -84,6 +84,24 @@ defmodule Drowzee.API.V1Beta1.SleepSchedule do
                 ingressName: %{
                   description: "The ingress that will be slept/woken.",
                   type: :string
+                },
+                needs: %{
+                  description: "List of SleepSchedules that must be woken up before this schedule during manual wake-up operations. Only schedules without their own 'needs' can be dependencies.",
+                  type: :array,
+                  items: %{
+                    type: :object,
+                    properties: %{
+                      name: %{
+                        type: :string,
+                        description: "Name of the SleepSchedule dependency"
+                      },
+                      namespace: %{
+                        type: :string,
+                        description: "Namespace of the SleepSchedule dependency"
+                      }
+                    },
+                    required: [:name, :namespace]
+                  }
                 }
               },
               required: [:sleepTime, :timezone, :wakeTime, :deployments]
@@ -99,6 +117,7 @@ defmodule Drowzee.API.V1Beta1.SleepSchedule do
         %{name: "Deployments", type: :string, description: "Deployments", jsonPath: ".spec.deployments[*].name"},
         %{name: "Statefulsets", type: :string, description: "Statefulsets", jsonPath: ".spec.statefulsets[*].name"},
         %{name: "Cronjobs", type: :string, description: "CronJobs", jsonPath: ".spec.cronjobs[*].name"},
+        %{name: "Needs", type: :string, description: "Dependencies", jsonPath: ".spec.needs[*].name"},
         %{name: "Sleeping?", type: :string, description: "Current Status", jsonPath: ".status.conditions[?(@.type == \"Sleeping\")].status"},
         %{name: "Transitioning?", type: :string, description: "Status Change In Progress", jsonPath: ".status.conditions[?(@.type == \"Transitioning\")].status"},
         %{name: "ManualOverride?", type: :string, description: "Status overridden by user", jsonPath: ".status.conditions[?(@.type == \"ManualOverride\")].status"}

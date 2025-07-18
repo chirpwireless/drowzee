@@ -7,6 +7,75 @@ defmodule DrowzeeWeb.HomeLive.Index do
   # Refresh interval in milliseconds (5 minutes)
   @refresh_interval 300_000
 
+  # Performance optimization: precompute dependency relationships
+  defp precompute_dependency_data(sleep_schedules) do
+    # Create lookup maps for O(1) access
+    schedule_lookup =
+      sleep_schedules
+      |> Enum.map(fn schedule ->
+        key = "#{schedule["metadata"]["namespace"]}/#{schedule["metadata"]["name"]}"
+        {key, schedule}
+      end)
+      |> Map.new()
+
+    # Precompute reverse dependencies (who depends on whom)
+    reverse_deps =
+      sleep_schedules
+      |> Enum.reduce(%{}, fn schedule, acc ->
+        needs = schedule["spec"]["needs"] || []
+
+        Enum.reduce(needs, acc, fn need, inner_acc ->
+          dependency_key = "#{need["namespace"]}/#{need["name"]}"
+          dependent_key = "#{schedule["metadata"]["namespace"]}/#{schedule["metadata"]["name"]}"
+
+          Map.update(inner_acc, dependency_key, [dependent_key], fn existing ->
+            [dependent_key | existing]
+          end)
+        end)
+      end)
+
+    # Precompute dependency status for each schedule
+    dependency_status =
+      sleep_schedules
+      |> Enum.map(fn schedule ->
+        key = "#{schedule["metadata"]["namespace"]}/#{schedule["metadata"]["name"]}"
+        needs = schedule["spec"]["needs"] || []
+
+        resolved_deps =
+          needs
+          |> Enum.map(fn need ->
+            dep_key = "#{need["namespace"]}/#{need["name"]}"
+            case Map.get(schedule_lookup, dep_key) do
+              nil ->
+                %{
+                  name: need["name"],
+                  namespace: need["namespace"],
+                  status: "not_found",
+                  display: "Not found"
+                }
+              dep_schedule ->
+                sleeping_condition = get_condition(dep_schedule, "Sleeping")
+                is_sleeping = sleeping_condition["status"] == "True"
+                %{
+                  name: need["name"],
+                  namespace: need["namespace"],
+                  status: if(is_sleeping, do: "sleeping", else: "awake"),
+                  display: if(is_sleeping, do: "Currently sleeping", else: "Currently awake")
+                }
+            end
+          end)
+
+        {key, resolved_deps}
+      end)
+      |> Map.new()
+
+    %{
+      schedule_lookup: schedule_lookup,
+      reverse_deps: reverse_deps,
+      dependency_status: dependency_status
+    }
+  end
+
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
@@ -391,6 +460,9 @@ defmodule DrowzeeWeb.HomeLive.Index do
           {[], %{}, calculate_namespace_status(sleep_schedules)}
       end
 
+    # Precompute dependency relationships
+    dependency_data = precompute_dependency_data(sleep_schedules)
+
     socket
     |> assign(:sleep_schedules, sleep_schedules)
     |> assign(:all_namespaces, all_namespaces)
@@ -401,6 +473,7 @@ defmodule DrowzeeWeb.HomeLive.Index do
     |> assign(:cronjobs_by_name, cronjobs_by_name)
     |> assign(:missing_resources, missing_resources)
     |> assign(:resolved_wildcard_names, resolved_wildcard_names)
+    |> assign(:dependency_data, dependency_data)
     |> assign(:loading, false)
     |> filter_sleep_schedules(socket.assigns.search)
   end
