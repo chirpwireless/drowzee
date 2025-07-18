@@ -135,13 +135,12 @@ defmodule Drowzee.Controller.SleepScheduleController do
         already_sleeping and
         not manual_override_exists
 
-    # Pass the manual override to the SleepChecker
+    # Check naptime based on schedule times and timezone
     case Drowzee.SleepChecker.naptime?(
            sleep_time,
            wake_time,
            timezone,
-           day_of_week,
-           manual_override_type
+           day_of_week
          ) do
       # We've removed the :inactive_day return value from the sleep checker
       # Now it always returns true/false for naptime
