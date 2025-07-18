@@ -3,25 +3,11 @@ defmodule Drowzee.SleepChecker do
 
   @doc """
   Check if it's naptime based on sleep and wake times, timezone, and day of week.
-  Also accepts an optional manual_override parameter to force a specific state.
   """
-  def naptime?(sleep_time, wake_time, timezone, day_of_week, manual_override \\ nil)
-
-  # Handle manual overrides first, regardless of other parameters
-  def naptime?(_sleep_time, _wake_time, _timezone, _day_of_week, "wake_up_override") do
-    Logger.debug("Manual wake-up override is active, ignoring day of week and time checks")
-    # Not naptime, force wake up
-    {:ok, false}
-  end
-
-  def naptime?(_sleep_time, _wake_time, _timezone, _day_of_week, "sleep_override") do
-    Logger.debug("Manual sleep override is active, ignoring day of week and time checks")
-    # Force naptime/sleep
-    {:ok, true}
-  end
+  def naptime?(sleep_time, wake_time, timezone, day_of_week)
 
   # Handle nil or empty wake_time
-  def naptime?(sleep_time, nil, timezone, day_of_week, _manual_override) do
+  def naptime?(sleep_time, nil, timezone, day_of_week) do
     # If wake_time is nil, we need to check if today is an active day for the schedule
     now = DateTime.now!(timezone)
     today_date = DateTime.to_date(now)
@@ -61,13 +47,13 @@ defmodule Drowzee.SleepChecker do
     end
   end
 
-  def naptime?(sleep_time, "", timezone, day_of_week, manual_override) do
+  def naptime?(sleep_time, "", timezone, day_of_week) do
     # Empty string wake_time is treated the same as nil
-    naptime?(sleep_time, nil, timezone, day_of_week, manual_override)
+    naptime?(sleep_time, nil, timezone, day_of_week)
   end
 
   # Main implementation for normal operation (no overrides, valid wake_time)
-  def naptime?(sleep_time, wake_time, timezone, day_of_week, _manual_override) do
+  def naptime?(sleep_time, wake_time, timezone, day_of_week) do
     now = DateTime.now!(timezone)
     today_date = DateTime.to_date(now)
 

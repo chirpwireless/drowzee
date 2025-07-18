@@ -61,6 +61,16 @@ defmodule Drowzee.K8s.SleepSchedule do
     end)
   end
 
+  def needs(sleep_schedule) do
+    Logger.debug("Needs entries: #{inspect(sleep_schedule["spec"]["needs"])}")
+    sleep_schedule["spec"]["needs"] || []
+  end
+
+  def has_needs?(sleep_schedule) do
+    needs = needs(sleep_schedule)
+    not Enum.empty?(needs)
+  end
+
   def ingress_name(sleep_schedule) do
     sleep_schedule["spec"]["ingressName"]
   end
@@ -541,5 +551,60 @@ defmodule Drowzee.K8s.SleepSchedule do
     )
     |> Drowzee.K8s.decrement_observed_generation()
     |> Bonny.Resource.apply_status(Drowzee.K8s.conn())
+  end
+
+  @doc """
+  Fetch and validate dependency schedules for manual wake-up.
+  Returns {:ok, valid_schedules} or {:error, reason}.
+  Only schedules without their own 'needs' can be dependencies.
+  """
+  def get_valid_dependencies(sleep_schedule) do
+    dependencies = needs(sleep_schedule)
+
+    if Enum.empty?(dependencies) do
+      {:ok, []}
+    else
+      Logger.debug("Fetching #{length(dependencies)} dependency schedules",
+        schedule: name(sleep_schedule)
+      )
+
+      results =
+        dependencies
+        |> Enum.map(&fetch_and_validate_dependency/1)
+        |> Enum.split_with(fn {status, _} -> status == :ok end)
+
+      case results do
+        {valid_deps, []} ->
+          # All dependencies are valid
+          schedules = Enum.map(valid_deps, fn {:ok, schedule} -> schedule end)
+          {:ok, schedules}
+
+        {valid_deps, invalid_deps} ->
+          # Some dependencies are invalid, log warnings but continue with valid ones
+          Enum.each(invalid_deps, fn {:error, reason} ->
+            Logger.warning("Invalid dependency: #{reason}", schedule: name(sleep_schedule))
+          end)
+
+          schedules = Enum.map(valid_deps, fn {:ok, schedule} -> schedule end)
+          {:ok, schedules}
+      end
+    end
+  end
+
+  defp fetch_and_validate_dependency(need) do
+    dep_name = need["name"]
+    dep_namespace = need["namespace"]
+
+    case Drowzee.K8s.get_sleep_schedule(dep_name, dep_namespace) do
+      {:ok, dep_schedule} ->
+        if has_needs?(dep_schedule) do
+          {:error, "#{dep_namespace}/#{dep_name} has its own dependencies (nested dependencies not allowed)"}
+        else
+          {:ok, dep_schedule}
+        end
+
+      {:error, reason} ->
+        {:error, "#{dep_namespace}/#{dep_name} not found: #{inspect(reason)}"}
+    end
   end
 end

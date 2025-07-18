@@ -29,6 +29,61 @@ defmodule Drowzee.K8s do
   end
 
   def manual_wake_up(sleep_schedule) do
+    # First, process any dependencies for this schedule
+    case Drowzee.K8s.SleepSchedule.get_valid_dependencies(sleep_schedule) do
+      {:ok, dependencies} ->
+        if Enum.empty?(dependencies) do
+          # No dependencies, proceed with normal wake-up
+          Logger.debug("No dependencies found, proceeding with wake-up",
+            schedule: Drowzee.K8s.SleepSchedule.name(sleep_schedule)
+          )
+          do_manual_wake_up(sleep_schedule)
+        else
+          # Wake up dependencies first
+          Logger.info("Waking up #{length(dependencies)} dependencies before main schedule",
+            schedule: Drowzee.K8s.SleepSchedule.name(sleep_schedule),
+            dependencies: Enum.map(dependencies, &"#{Drowzee.K8s.SleepSchedule.namespace(&1)}/#{Drowzee.K8s.SleepSchedule.name(&1)}")
+          )
+
+          # Wake up each dependency (they will be processed with higher priority)
+          dependency_results =
+            dependencies
+            |> Enum.map(fn dep_schedule ->
+              Logger.debug("Waking up dependency",
+                dependency: "#{Drowzee.K8s.SleepSchedule.namespace(dep_schedule)}/#{Drowzee.K8s.SleepSchedule.name(dep_schedule)}"
+              )
+              do_manual_wake_up(dep_schedule)
+            end)
+
+          # Check if any dependencies failed
+          failed_deps =
+            dependency_results
+            |> Enum.with_index()
+            |> Enum.filter(fn {{status, _}, _idx} -> status == :error end)
+
+          if not Enum.empty?(failed_deps) do
+            Logger.warning("Some dependencies failed to wake up, but continuing with main schedule",
+              schedule: Drowzee.K8s.SleepSchedule.name(sleep_schedule),
+              failed_count: length(failed_deps)
+            )
+          end
+
+          # Now wake up the main schedule
+          Logger.debug("Waking up main schedule after dependencies",
+            schedule: Drowzee.K8s.SleepSchedule.name(sleep_schedule)
+          )
+          do_manual_wake_up(sleep_schedule)
+        end
+
+      {:error, reason} ->
+        Logger.warning("Failed to fetch dependencies, proceeding with wake-up anyway: #{inspect(reason)}",
+          schedule: Drowzee.K8s.SleepSchedule.name(sleep_schedule)
+        )
+        do_manual_wake_up(sleep_schedule)
+    end
+  end
+
+  defp do_manual_wake_up(sleep_schedule) do
     Drowzee.K8s.SleepSchedule.put_condition(
       sleep_schedule,
       "ManualOverride",

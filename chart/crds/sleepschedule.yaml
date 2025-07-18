@@ -51,6 +51,7 @@ spec:
               type: object
               required:
                 - sleepTime
+                - wakeTime
                 - timezone
               properties:
                 enabled:
@@ -87,6 +88,21 @@ spec:
                     properties:
                       name:
                         type: string
+                needs:
+                  type: array
+                  description: List of other SleepSchedules that this schedule depends on. Dependencies will be woken up first during manual wake-up operations.
+                  items:
+                    type: object
+                    required:
+                      - name
+                      - namespace
+                    properties:
+                      name:
+                        type: string
+                        description: Name of the dependency SleepSchedule
+                      namespace:
+                        type: string
+                        description: Namespace of the dependency SleepSchedule
                 ingressName:
                   type: string
                   description: The ingress that will be slept/woken.
@@ -99,6 +115,10 @@ spec:
                 wakeTime:
                   type: string
                   description: "The time that the deployment will wake up (format: HH:MM for 24h or H:MMam/pm for 12h)"
+                onDemand:
+                  type: boolean
+                  description: "If true, the schedule will not automatically wake up at wakeTime but will still auto-sleep at sleepTime. Manual overrides are still auto-removed at scheduled times. If false (default), schedule works normally with auto-wake and auto-sleep."
+                  default: false
                 dayOfWeek:
                   type: string
                   description: "Cron-like expression for days of the week when the schedule is active (0-6 or SUN-SAT). Examples: '1-5' for weekdays, '0,6' for weekends, '*' for all days (default)."
@@ -137,6 +157,14 @@ spec:
           type: string
           description: CronJobs
           jsonPath: .spec.cronjobs[*].name
+        - name: Needs
+          type: string
+          description: Dependencies
+          jsonPath: .spec.needs[*].name
+        - name: OnDemand
+          type: string
+          description: On Demand
+          jsonPath: .spec.onDemand
         - name: Sleeping?
           type: string
           description: Current Status
