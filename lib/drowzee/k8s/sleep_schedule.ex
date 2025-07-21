@@ -96,6 +96,15 @@ defmodule Drowzee.K8s.SleepSchedule do
     (get_condition(sleep_schedule, "Sleeping") || %{})["status"] == "True"
   end
 
+  @doc """
+  Generate a unique key for this sleep schedule in the format "namespace/name".
+  This key is used in the drowzee.io/managed-by annotation to track which
+  schedule manages each resource.
+  """
+  def schedule_key(sleep_schedule) do
+    "#{namespace(sleep_schedule)}/#{name(sleep_schedule)}"
+  end
+
   def get_ingress(sleep_schedule) do
     case ingress_name(sleep_schedule) do
       nil ->
@@ -269,18 +278,21 @@ defmodule Drowzee.K8s.SleepSchedule do
   def scale_down_deployments(sleep_schedule) do
     Logger.debug("Scaling down deployments...")
 
+    # Create a closure that captures the schedule key
+    key = schedule_key(sleep_schedule)
+    scale_func = fn deployment -> Drowzee.K8s.Deployment.scale_down(deployment, key) end
+
     case get_deployments(sleep_schedule) do
       {:ok, deployments} ->
         # All deployments found, proceed normally
-        scale_resource_with_module(deployments, &Drowzee.K8s.Deployment.scale_down/1)
+        scale_resource_with_module(deployments, scale_func)
 
       {:partial, found_deployments, missing_resources} ->
         # Some deployments were not found
         Logger.warning("Some deployments were not found: #{inspect(missing_resources)}")
 
         # Scale the deployments that were found
-        scaling_result =
-          scale_resource_with_module(found_deployments, &Drowzee.K8s.Deployment.scale_down/1)
+        scaling_result = scale_resource_with_module(found_deployments, scale_func)
 
         # Create a combined result that includes both scaling results and missing resources
         case scaling_result do
@@ -301,18 +313,21 @@ defmodule Drowzee.K8s.SleepSchedule do
   def scale_down_statefulsets(sleep_schedule) do
     Logger.debug("Scaling down statefulsets...")
 
+    # Create a closure that captures the schedule key
+    key = schedule_key(sleep_schedule)
+    scale_func = fn statefulset -> Drowzee.K8s.StatefulSet.scale_down(statefulset, key) end
+
     case get_statefulsets(sleep_schedule) do
       {:ok, statefulsets} ->
         # All statefulsets found, proceed normally
-        scale_resource_with_module(statefulsets, &Drowzee.K8s.StatefulSet.scale_down/1)
+        scale_resource_with_module(statefulsets, scale_func)
 
       {:partial, found_statefulsets, missing_resources} ->
         # Some statefulsets were not found
         Logger.warning("Some statefulsets were not found: #{inspect(missing_resources)}")
 
         # Scale the statefulsets that were found
-        scaling_result =
-          scale_resource_with_module(found_statefulsets, &Drowzee.K8s.StatefulSet.scale_down/1)
+        scaling_result = scale_resource_with_module(found_statefulsets, scale_func)
 
         # Create a combined result that includes both scaling results and missing resources
         case scaling_result do
@@ -333,18 +348,21 @@ defmodule Drowzee.K8s.SleepSchedule do
   def scale_up_deployments(sleep_schedule) do
     Logger.debug("Scaling up deployments...")
 
+    # Create a closure that captures the schedule key
+    key = schedule_key(sleep_schedule)
+    scale_func = fn deployment -> Drowzee.K8s.Deployment.scale_up(deployment, key) end
+
     case get_deployments(sleep_schedule) do
       {:ok, deployments} ->
         # All deployments found, proceed normally
-        scale_resource_with_module(deployments, &Drowzee.K8s.Deployment.scale_up/1)
+        scale_resource_with_module(deployments, scale_func)
 
       {:partial, found_deployments, missing_resources} ->
         # Some deployments were not found
         Logger.warning("Some deployments were not found: #{inspect(missing_resources)}")
 
         # Scale the deployments that were found
-        scaling_result =
-          scale_resource_with_module(found_deployments, &Drowzee.K8s.Deployment.scale_up/1)
+        scaling_result = scale_resource_with_module(found_deployments, scale_func)
 
         # Create a combined result that includes both scaling results and missing resources
         case scaling_result do
@@ -437,8 +455,9 @@ defmodule Drowzee.K8s.SleepSchedule do
   def suspend_cronjobs(sleep_schedule) do
     Logger.debug("Suspending cronjobs...")
 
-    # Create a function that suspends a cronjob
-    suspend_func = fn cronjob -> CronJob.suspend(cronjob, true) end
+    # Create a function that suspends a cronjob with schedule key
+    key = schedule_key(sleep_schedule)
+    suspend_func = fn cronjob -> CronJob.suspend(cronjob, true, key) end
 
     case get_cronjobs(sleep_schedule) do
       {:ok, cronjobs} ->
@@ -471,8 +490,9 @@ defmodule Drowzee.K8s.SleepSchedule do
   def resume_cronjobs(sleep_schedule) do
     Logger.debug("Resuming cronjobs...")
 
-    # Create a function that resumes a cronjob
-    resume_func = fn cronjob -> CronJob.suspend(cronjob, false) end
+    # Create a function that resumes a cronjob with schedule key
+    key = schedule_key(sleep_schedule)
+    resume_func = fn cronjob -> CronJob.suspend(cronjob, false, key) end
 
     case get_cronjobs(sleep_schedule) do
       {:ok, cronjobs} ->

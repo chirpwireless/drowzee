@@ -8,38 +8,37 @@ defmodule Drowzee.K8s.CronJob do
   def suspend(cronjob), do: cronjob["spec"]["suspend"] || false
 
   @doc """
+  Add the managed-by annotation to track which SleepSchedule manages this resource.
+  """
+  def add_managed_by_annotation(cronjob, sleep_schedule_key) do
+    if sleep_schedule_key do
+      annotations = get_in(cronjob, ["metadata", "annotations"]) || %{}
+      updated_annotations = Map.put(annotations, "drowzee.io/managed-by", sleep_schedule_key)
+      put_in(cronjob, ["metadata", "annotations"], updated_annotations)
+    else
+      cronjob
+    end
+  end
+
+  @doc """
   Save the current suspension state as an annotation on the cronjob before suspending.
   This tracks the state before Drowzee modifies it, and should be called every time
   before suspend since users can change the state while the CronJob is awake.
+  Also adds the managed-by annotation to track which SleepSchedule manages this resource.
   """
-  def save_original_state(cronjob) do
+  def save_original_state(cronjob, sleep_schedule_key \\ nil) do
     current_suspend = get_in(cronjob, ["spec", "suspend"]) || false
     current_suspend_str = to_string(current_suspend)
 
     # Always update the annotation with the current state before suspend
-    cronjob_with_annotations = ensure_annotations(cronjob)
-    updated_cronjob = put_in(
-      cronjob_with_annotations,
-      ["metadata", "annotations", "drowzee.io/original-suspend"],
-      current_suspend_str
-    )
+    annotations = get_in(cronjob, ["metadata", "annotations"]) || %{}
 
-    # Persist the annotation to Kubernetes
-    case K8s.Client.run(Drowzee.K8s.conn(), K8s.Client.update(updated_cronjob)) do
-      {:ok, persisted_cronjob} ->
-        Logger.debug("Saved original suspend state for CronJob",
-          name: name(cronjob),
-          original_suspend: current_suspend
-        )
-        {:ok, persisted_cronjob}
+    updated_annotations =
+      annotations
+      |> Map.put("drowzee.io/original-suspend", current_suspend_str)
+      |> Map.put("drowzee.io/managed-by", sleep_schedule_key)
 
-      {:error, reason} ->
-        Logger.warning("Failed to save original suspend state annotation: #{inspect(reason)}",
-          name: name(cronjob)
-        )
-        # Return the cronjob with annotation in memory even if persistence failed
-        {:ok, updated_cronjob}
-    end
+    put_in(cronjob, ["metadata", "annotations"], updated_annotations)
   end
 
   @doc """
@@ -59,8 +58,9 @@ defmodule Drowzee.K8s.CronJob do
   Scale a cronjob by setting its suspend state, but only if it should be modified.
   For suspend operations: always suspend (save original state first if needed)
   For resume operations: only resume if the original state was not suspended
+  Also adds managed-by annotation to track which SleepSchedule manages this resource.
   """
-  def suspend(%{"kind" => "CronJob"} = cronjob, suspend) do
+  def suspend(%{"kind" => "CronJob"} = cronjob, suspend, sleep_schedule_key \\ nil) do
     # First check if the CronJob is already in the desired state
     operation = if suspend, do: :suspend, else: :resume
 
@@ -70,29 +70,39 @@ defmodule Drowzee.K8s.CronJob do
       current_suspend: get_in(cronjob, ["spec", "suspend"]) || false
     )
 
-    # Save original state before suspend operations (not resume)
-    if suspend do
+    # Always save original state before suspend operations (not resume)
+    cronjob = if suspend do
       Logger.debug("Saving original state before suspend", name: name(cronjob))
-      case save_original_state(cronjob) do
-        {:ok, _updated_cronjob} ->
-          Logger.debug("Original state saved successfully", name: name(cronjob))
-        {:error, reason} ->
-          Logger.warning("Failed to save original state: #{inspect(reason)}", name: name(cronjob))
-      end
+      save_original_state(cronjob, sleep_schedule_key)
+    else
+      cronjob
     end
 
     case Drowzee.K8s.ResourceUtils.check_resource_state(cronjob, operation) do
       {:already_in_desired_state, cronjob} ->
-        # Already in the desired state, return success
-        Logger.debug("CronJob already in desired state",
-          name: name(cronjob),
-          operation: operation
-        )
-        {:ok, cronjob}
+        if suspend do
+          # CronJob already suspended, but we saved the original state above
+          # Need to persist the annotation since no other update will happen
+          case K8s.Client.run(Drowzee.K8s.conn(), K8s.Client.update(cronjob)) do
+            {:ok, updated_cronjob} ->
+              Logger.debug("Saved original state for already-suspended CronJob", name: name(cronjob))
+              {:ok, updated_cronjob}
+            {:error, reason} ->
+              Logger.warning("Failed to save original state annotation: #{inspect(reason)}", name: name(cronjob))
+              {:ok, cronjob}  # Return success even if annotation failed
+          end
+        else
+          # Already in the desired state for resume, return success
+          Logger.debug("CronJob already in desired state",
+            name: name(cronjob),
+            operation: operation
+          )
+          {:ok, cronjob}
+        end
 
       {:needs_modification, cronjob} ->
         if suspend do
-          # When suspending, just do the suspend operation (original state already saved)
+          # Original state already saved above, just do the suspend operation
           Logger.debug("Suspending CronJob", name: name(cronjob))
           do_suspend(cronjob, true)
         else
