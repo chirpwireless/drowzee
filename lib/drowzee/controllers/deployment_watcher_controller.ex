@@ -14,8 +14,8 @@ defmodule Drowzee.Controller.DeploymentWatcherController do
     # Only process Deployments that are managed by Drowzee
     case get_managed_by(deployment) do
       nil ->
-        # Not managed by Drowzee, skip
-        axn
+        # Not managed by Drowzee, halt processing
+        Bonny.Axn.halt(axn)
 
       sleep_schedule_key ->
         Logger.metadata(

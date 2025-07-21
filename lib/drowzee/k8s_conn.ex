@@ -10,7 +10,7 @@ defmodule Drowzee.K8sConn do
 
   @spec get!(keyword()) :: K8s.Conn.t()
   def get!(opts) do
-    get!(Keyword.get(opts, :method, :service_account), opts)
+    get!(Keyword.get(opts, :method, :kube_config), opts)
   end
 
   def get!(:kube_config, opts) do
