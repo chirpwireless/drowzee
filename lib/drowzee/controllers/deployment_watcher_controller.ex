@@ -5,6 +5,7 @@ defmodule Drowzee.Controller.DeploymentWatcherController do
   """
 
   use Bonny.ControllerV2
+  import Drowzee.Axn
   require Logger
 
   step(Bonny.Pluggable.SkipObservedGenerations)
@@ -14,8 +15,8 @@ defmodule Drowzee.Controller.DeploymentWatcherController do
     # Only process Deployments that are managed by Drowzee
     case get_managed_by(deployment) do
       nil ->
-        # Not managed by Drowzee, halt processing
-        Bonny.Axn.halt(axn)
+        # Not managed by Drowzee, skip with success_event
+        success_event(axn)
 
       sleep_schedule_key ->
         Logger.metadata(
