@@ -10,34 +10,48 @@ defmodule Drowzee.K8s.Deployment do
   def ready_replicas(deployment), do: deployment["status"]["readyReplicas"] || 0
 
   @doc """
-  Always save (or update) the current replica count as an annotation on the deployment.
+  Add the managed-by annotation to track which SleepSchedule manages this resource.
   """
-  def save_original_replicas(deployment) do
+  def add_managed_by_annotation(deployment, sleep_schedule_key) do
+    if sleep_schedule_key do
+      annotations = get_in(deployment, ["metadata", "annotations"]) || %{}
+      updated_annotations = Map.put(annotations, "drowzee.io/managed-by", sleep_schedule_key)
+      put_in(deployment, ["metadata", "annotations"], updated_annotations)
+    else
+      deployment
+    end
+  end
+
+  @doc """
+  Always save (or update) the current replica count as an annotation on the deployment.
+  Also adds the managed-by annotation to track which SleepSchedule manages this resource.
+  """
+  def save_original_replicas(deployment, sleep_schedule_key \\ nil) do
     annotations = get_in(deployment, ["metadata", "annotations"]) || %{}
     current = get_in(deployment, ["spec", "replicas"]) || 0
     current_str = Integer.to_string(current)
+
+    original_annotation = Map.get(annotations, "drowzee.io/original-replicas")
 
     # Only save if:
     # - annotation is missing OR
     # - annotation value != current AND current > 0
     # This way, if someone changed the replica count while awake, you update it before sleep
-    case Map.get(annotations, "drowzee.io/original-replicas") do
-      nil when current > 0 ->
-        put_in(
-          deployment,
-          ["metadata", "annotations", "drowzee.io/original-replicas"],
-          current_str
-        )
+    should_save = case original_annotation do
+      nil when current > 0 -> true
+      value when value != current_str and current > 0 -> true
+      _ -> false
+    end
 
-      value when value != current_str and current > 0 ->
-        put_in(
-          deployment,
-          ["metadata", "annotations", "drowzee.io/original-replicas"],
-          current_str
-        )
+    if should_save do
+      annotations =
+        annotations
+        |> Map.put("drowzee.io/original-replicas", current_str)
+        |> Map.put("drowzee.io/managed-by", sleep_schedule_key)
 
-      _ ->
-        deployment
+      put_in(deployment, ["metadata", "annotations"], annotations)
+    else
+      deployment
     end
   end
 
@@ -81,18 +95,27 @@ defmodule Drowzee.K8s.Deployment do
   Scale down a Deployment to 0 replicas.
   Saves the original replica count as an annotation before scaling down.
   """
-  def scale_down(%{"kind" => "Deployment"} = deployment) do
+  def scale_down(%{"kind" => "Deployment"} = deployment, sleep_schedule_key \\ nil) do
     try do
-      # First check if the Deployment is already scaled down
+      # Always save original replicas before scale down operations
+      deployment = save_original_replicas(deployment, sleep_schedule_key)
+
+      # Then check if the Deployment is already scaled down
       case Drowzee.K8s.ResourceUtils.check_resource_state(deployment, :scale_down) do
         {:already_in_desired_state, deployment} ->
-          # Already scaled down, return success
-          {:ok, deployment}
+          # Already scaled down, but we saved the original replicas above
+          # Need to persist the annotation since no other update will happen
+          case K8s.Client.run(Drowzee.K8s.conn(), K8s.Client.update(deployment)) do
+            {:ok, updated_deployment} ->
+              Logger.debug("Saved original replicas for already-scaled-down Deployment", name: name(deployment))
+              {:ok, updated_deployment}
+            {:error, reason} ->
+              Logger.warning("Failed to save original replicas annotation: #{inspect(reason)}", name: name(deployment))
+              {:ok, deployment}  # Return success even if annotation failed
+          end
 
         {:needs_modification, deployment} ->
-          # Save the original replicas count
-          deployment = save_original_replicas(deployment)
-
+          # Original replicas already saved above, just do the scale operation
           # Scale down to 0
           case scale_deployment(deployment, 0) do
             {:ok, scaled_deployment} ->
@@ -156,10 +179,12 @@ defmodule Drowzee.K8s.Deployment do
   end
 
   @doc """
-  Scale up a Deployment to its original replica count (stored in annotations).
+  Scale up a Deployment to its original replica count.
+  Gets the original replica count from the annotation and scales up to that value.
   Clears any error annotations after successful scaling.
+  Also adds managed-by annotation to track which SleepSchedule manages this resource.
   """
-  def scale_up(%{"kind" => "Deployment"} = deployment) do
+  def scale_up(%{"kind" => "Deployment"} = deployment, sleep_schedule_key \\ nil) do
     try do
       # First check if the Deployment is already scaled up
       case Drowzee.K8s.ResourceUtils.check_resource_state(deployment, :scale_up) do
@@ -168,6 +193,9 @@ defmodule Drowzee.K8s.Deployment do
           {:ok, deployment}
 
         {:needs_modification, deployment} ->
+          # Add managed-by annotation before scaling up
+          deployment = add_managed_by_annotation(deployment, sleep_schedule_key)
+
           # Get the original replica count
           original = get_original_replicas(deployment)
 

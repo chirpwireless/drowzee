@@ -386,11 +386,12 @@ defmodule Drowzee.Controller.SleepScheduleController do
     namespace = Map.get(metadata, "namespace")
 
     original_replicas = Map.get(metadata["annotations"] || %{}, "drowzee.io/original-replicas")
+    original_suspend = Map.get(metadata["annotations"] || %{}, "drowzee.io/original-suspend")
     spec_replicas = Map.get(spec, "replicas")
     suspended = Map.get(status, "suspended", true)
 
     Logger.debug(
-      "Ready check for #{namespace}/#{name} - spec_replicas: #{spec_replicas}, original_replicas: #{original_replicas}, suspended: #{suspended}"
+      "Ready check for #{namespace}/#{name} - spec_replicas: #{spec_replicas}, original_replicas: #{original_replicas}, suspended: #{suspended}, original_suspend: #{original_suspend}"
     )
 
     cond do
@@ -410,9 +411,16 @@ defmodule Drowzee.Controller.SleepScheduleController do
             false
         end
 
-      # For CronJobs: considered ready if not suspended
+      # For CronJobs: check suspend state considering original user intent
       true ->
-        suspended == false
+        case original_suspend do
+          "true" ->
+            # CronJob was originally suspended by user, so it's ready when suspended
+            suspended == true
+          _ ->
+            # CronJob was not originally suspended, so it's ready when not suspended
+            suspended == false
+        end
     end
   end
 
