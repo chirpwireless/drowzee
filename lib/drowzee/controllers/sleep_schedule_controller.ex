@@ -390,9 +390,18 @@ defmodule Drowzee.Controller.SleepScheduleController do
     spec_replicas = Map.get(spec, "replicas")
     suspended = Map.get(status, "suspended", true)
 
-    Logger.debug(
-      "Ready check for #{namespace}/#{name} - spec_replicas: #{spec_replicas}, original_replicas: #{original_replicas}, suspended: #{suspended}, original_suspend: #{original_suspend}"
-    )
+    # Log different information based on resource type
+    if is_nil(spec_replicas) do
+      # CronJob - show suspend-related info
+      Logger.debug(
+        "Ready check for #{namespace}/#{name} - suspended: #{suspended}, original_suspend: #{original_suspend}"
+      )
+    else
+      # Deployment/StatefulSet - show replica-related info
+      Logger.debug(
+        "Ready check for #{namespace}/#{name} - spec_replicas: #{spec_replicas}, original_replicas: #{original_replicas}"
+      )
+    end
 
     cond do
       # For newly added apps without original_replicas annotation
@@ -605,6 +614,14 @@ defmodule Drowzee.Controller.SleepScheduleController do
       {:ok, _updated} ->
         # Return the original axn to continue processing
         # The override removal will trigger a new event
+        axn
+
+      {:error, error} ->
+        Logger.error("Failed to remove manual override", error: inspect(error))
+        axn
+    end
+  end
+end
         axn
 
       {:error, error} ->
