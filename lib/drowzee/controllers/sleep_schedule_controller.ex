@@ -622,11 +622,3 @@ defmodule Drowzee.Controller.SleepScheduleController do
     end
   end
 end
-        axn
-
-      {:error, error} ->
-        Logger.error("Failed to remove manual override", error: inspect(error))
-        axn
-    end
-  end
-end
