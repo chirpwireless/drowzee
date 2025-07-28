@@ -61,6 +61,16 @@ defmodule Drowzee.K8s.SleepSchedule do
     end)
   end
 
+  def needs(sleep_schedule) do
+    Logger.debug("Needs entries: #{inspect(sleep_schedule["spec"]["needs"])}")
+    sleep_schedule["spec"]["needs"] || []
+  end
+
+  def has_needs?(sleep_schedule) do
+    needs = needs(sleep_schedule)
+    not Enum.empty?(needs)
+  end
+
   def ingress_name(sleep_schedule) do
     sleep_schedule["spec"]["ingressName"]
   end
@@ -84,6 +94,15 @@ defmodule Drowzee.K8s.SleepSchedule do
 
   def is_sleeping?(sleep_schedule) do
     (get_condition(sleep_schedule, "Sleeping") || %{})["status"] == "True"
+  end
+
+  @doc """
+  Generate a unique key for this sleep schedule in the format "namespace/name".
+  This key is used in the drowzee.io/managed-by annotation to track which
+  schedule manages each resource.
+  """
+  def schedule_key(sleep_schedule) do
+    "#{namespace(sleep_schedule)}/#{name(sleep_schedule)}"
   end
 
   def get_ingress(sleep_schedule) do
@@ -259,18 +278,21 @@ defmodule Drowzee.K8s.SleepSchedule do
   def scale_down_deployments(sleep_schedule) do
     Logger.debug("Scaling down deployments...")
 
+    # Create a closure that captures the schedule key
+    key = schedule_key(sleep_schedule)
+    scale_func = fn deployment -> Drowzee.K8s.Deployment.scale_down(deployment, key) end
+
     case get_deployments(sleep_schedule) do
       {:ok, deployments} ->
         # All deployments found, proceed normally
-        scale_resource_with_module(deployments, &Drowzee.K8s.Deployment.scale_down/1)
+        scale_resource_with_module(deployments, scale_func)
 
       {:partial, found_deployments, missing_resources} ->
         # Some deployments were not found
         Logger.warning("Some deployments were not found: #{inspect(missing_resources)}")
 
         # Scale the deployments that were found
-        scaling_result =
-          scale_resource_with_module(found_deployments, &Drowzee.K8s.Deployment.scale_down/1)
+        scaling_result = scale_resource_with_module(found_deployments, scale_func)
 
         # Create a combined result that includes both scaling results and missing resources
         case scaling_result do
@@ -291,18 +313,21 @@ defmodule Drowzee.K8s.SleepSchedule do
   def scale_down_statefulsets(sleep_schedule) do
     Logger.debug("Scaling down statefulsets...")
 
+    # Create a closure that captures the schedule key
+    key = schedule_key(sleep_schedule)
+    scale_func = fn statefulset -> Drowzee.K8s.StatefulSet.scale_down(statefulset, key) end
+
     case get_statefulsets(sleep_schedule) do
       {:ok, statefulsets} ->
         # All statefulsets found, proceed normally
-        scale_resource_with_module(statefulsets, &Drowzee.K8s.StatefulSet.scale_down/1)
+        scale_resource_with_module(statefulsets, scale_func)
 
       {:partial, found_statefulsets, missing_resources} ->
         # Some statefulsets were not found
         Logger.warning("Some statefulsets were not found: #{inspect(missing_resources)}")
 
         # Scale the statefulsets that were found
-        scaling_result =
-          scale_resource_with_module(found_statefulsets, &Drowzee.K8s.StatefulSet.scale_down/1)
+        scaling_result = scale_resource_with_module(found_statefulsets, scale_func)
 
         # Create a combined result that includes both scaling results and missing resources
         case scaling_result do
@@ -323,18 +348,21 @@ defmodule Drowzee.K8s.SleepSchedule do
   def scale_up_deployments(sleep_schedule) do
     Logger.debug("Scaling up deployments...")
 
+    # Create a closure that captures the schedule key
+    key = schedule_key(sleep_schedule)
+    scale_func = fn deployment -> Drowzee.K8s.Deployment.scale_up(deployment, key) end
+
     case get_deployments(sleep_schedule) do
       {:ok, deployments} ->
         # All deployments found, proceed normally
-        scale_resource_with_module(deployments, &Drowzee.K8s.Deployment.scale_up/1)
+        scale_resource_with_module(deployments, scale_func)
 
       {:partial, found_deployments, missing_resources} ->
         # Some deployments were not found
         Logger.warning("Some deployments were not found: #{inspect(missing_resources)}")
 
         # Scale the deployments that were found
-        scaling_result =
-          scale_resource_with_module(found_deployments, &Drowzee.K8s.Deployment.scale_up/1)
+        scaling_result = scale_resource_with_module(found_deployments, scale_func)
 
         # Create a combined result that includes both scaling results and missing resources
         case scaling_result do
@@ -427,8 +455,9 @@ defmodule Drowzee.K8s.SleepSchedule do
   def suspend_cronjobs(sleep_schedule) do
     Logger.debug("Suspending cronjobs...")
 
-    # Create a function that suspends a cronjob
-    suspend_func = fn cronjob -> CronJob.suspend_cronjob(cronjob, true) end
+    # Create a function that suspends a cronjob with schedule key
+    key = schedule_key(sleep_schedule)
+    suspend_func = fn cronjob -> CronJob.suspend(cronjob, true, key) end
 
     case get_cronjobs(sleep_schedule) do
       {:ok, cronjobs} ->
@@ -461,8 +490,9 @@ defmodule Drowzee.K8s.SleepSchedule do
   def resume_cronjobs(sleep_schedule) do
     Logger.debug("Resuming cronjobs...")
 
-    # Create a function that resumes a cronjob
-    resume_func = fn cronjob -> CronJob.suspend_cronjob(cronjob, false) end
+    # Create a function that resumes a cronjob with schedule key
+    key = schedule_key(sleep_schedule)
+    resume_func = fn cronjob -> CronJob.suspend(cronjob, false, key) end
 
     case get_cronjobs(sleep_schedule) do
       {:ok, cronjobs} ->
@@ -541,5 +571,60 @@ defmodule Drowzee.K8s.SleepSchedule do
     )
     |> Drowzee.K8s.decrement_observed_generation()
     |> Bonny.Resource.apply_status(Drowzee.K8s.conn())
+  end
+
+  @doc """
+  Fetch and validate dependency schedules for manual wake-up.
+  Returns {:ok, valid_schedules} or {:error, reason}.
+  Only schedules without their own 'needs' can be dependencies.
+  """
+  def get_valid_dependencies(sleep_schedule) do
+    dependencies = needs(sleep_schedule)
+
+    if Enum.empty?(dependencies) do
+      {:ok, []}
+    else
+      Logger.debug("Fetching #{length(dependencies)} dependency schedules",
+        schedule: name(sleep_schedule)
+      )
+
+      results =
+        dependencies
+        |> Enum.map(&fetch_and_validate_dependency/1)
+        |> Enum.split_with(fn {status, _} -> status == :ok end)
+
+      case results do
+        {valid_deps, []} ->
+          # All dependencies are valid
+          schedules = Enum.map(valid_deps, fn {:ok, schedule} -> schedule end)
+          {:ok, schedules}
+
+        {valid_deps, invalid_deps} ->
+          # Some dependencies are invalid, log warnings but continue with valid ones
+          Enum.each(invalid_deps, fn {:error, reason} ->
+            Logger.warning("Invalid dependency: #{reason}", schedule: name(sleep_schedule))
+          end)
+
+          schedules = Enum.map(valid_deps, fn {:ok, schedule} -> schedule end)
+          {:ok, schedules}
+      end
+    end
+  end
+
+  defp fetch_and_validate_dependency(need) do
+    dep_name = need["name"]
+    dep_namespace = need["namespace"]
+
+    case Drowzee.K8s.get_sleep_schedule(dep_name, dep_namespace) do
+      {:ok, dep_schedule} ->
+        if has_needs?(dep_schedule) do
+          {:error, "#{dep_namespace}/#{dep_name} has its own dependencies (nested dependencies not allowed)"}
+        else
+          {:ok, dep_schedule}
+        end
+
+      {:error, reason} ->
+        {:error, "#{dep_namespace}/#{dep_name} not found: #{inspect(reason)}"}
+    end
   end
 end

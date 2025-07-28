@@ -135,13 +135,12 @@ defmodule Drowzee.Controller.SleepScheduleController do
         already_sleeping and
         not manual_override_exists
 
-    # Pass the manual override to the SleepChecker
+    # Check naptime based on schedule times and timezone
     case Drowzee.SleepChecker.naptime?(
            sleep_time,
            wake_time,
            timezone,
-           day_of_week,
-           manual_override_type
+           day_of_week
          ) do
       # We've removed the :inactive_day return value from the sleep checker
       # Now it always returns true/false for naptime
@@ -219,7 +218,14 @@ defmodule Drowzee.Controller.SleepScheduleController do
           initiate_sleep(axn)
 
         {:sleeping, :no_transition, :no_override, :not_naptime} ->
-          initiate_wake_up(axn)
+          # Check if this is an on-demand schedule
+          on_demand = get_in(axn.resource, ["spec", "onDemand"]) || false
+          if on_demand do
+            Logger.info("Skipping auto-wake for on-demand schedule")
+            axn
+          else
+            initiate_wake_up(axn)
+          end
 
         # Await transitions (could be moved to background process)
         {:awake, :transition, _, _} ->
@@ -380,12 +386,22 @@ defmodule Drowzee.Controller.SleepScheduleController do
     namespace = Map.get(metadata, "namespace")
 
     original_replicas = Map.get(metadata["annotations"] || %{}, "drowzee.io/original-replicas")
+    original_suspend = Map.get(metadata["annotations"] || %{}, "drowzee.io/original-suspend")
     spec_replicas = Map.get(spec, "replicas")
     suspended = Map.get(status, "suspended", true)
 
-    Logger.debug(
-      "Ready check for #{namespace}/#{name} - spec_replicas: #{spec_replicas}, original_replicas: #{original_replicas}, suspended: #{suspended}"
-    )
+    # Log different information based on resource type
+    if is_nil(spec_replicas) do
+      # CronJob - show suspend-related info
+      Logger.debug(
+        "Ready check for #{namespace}/#{name} - suspended: #{suspended}, original_suspend: #{original_suspend}"
+      )
+    else
+      # Deployment/StatefulSet - show replica-related info
+      Logger.debug(
+        "Ready check for #{namespace}/#{name} - spec_replicas: #{spec_replicas}, original_replicas: #{original_replicas}"
+      )
+    end
 
     cond do
       # For newly added apps without original_replicas annotation
@@ -404,9 +420,16 @@ defmodule Drowzee.Controller.SleepScheduleController do
             false
         end
 
-      # For CronJobs: considered ready if not suspended
+      # For CronJobs: check suspend state considering original user intent
       true ->
-        suspended == false
+        case original_suspend do
+          "true" ->
+            # CronJob was originally suspended by user, so it's ready when suspended
+            suspended == true
+          _ ->
+            # CronJob was not originally suspended, so it's ready when not suspended
+            suspended == false
+        end
     end
   end
 
