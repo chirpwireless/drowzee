@@ -617,8 +617,13 @@ defmodule Drowzee.Controller.SleepScheduleController do
         axn
 
       {:error, error} ->
-        Logger.error("Failed to remove manual override", error: inspect(error))
+        Logger.error("Failed to remove manual override - override will persist", 
+          schedule: Drowzee.K8s.SleepSchedule.name(sleep_schedule),
+          error: inspect(error))
+        # Set an error condition to indicate the problem
         axn
+        |> set_condition("Error", true, "OverrideRemovalFailed", 
+             "Failed to remove manual override: #{inspect(error)}")
     end
   end
 end

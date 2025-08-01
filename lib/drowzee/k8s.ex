@@ -84,42 +84,84 @@ defmodule Drowzee.K8s do
   end
 
   defp do_manual_wake_up(sleep_schedule) do
-    Drowzee.K8s.SleepSchedule.put_condition(
-      sleep_schedule,
-      "ManualOverride",
-      true,
-      "WakeUp",
-      "Force deployments to wake up"
-    )
-    # Make sure we handle the modify event rather then wait for a reconcile
-    |> decrement_observed_generation()
-    |> Bonny.Resource.apply_status(conn(), force: true)
+    result = 
+      Drowzee.K8s.SleepSchedule.put_condition(
+        sleep_schedule,
+        "ManualOverride",
+        true,
+        "WakeUp",
+        "Force deployments to wake up"
+      )
+      # Make sure we handle the modify event rather then wait for a reconcile
+      |> decrement_observed_generation()
+      |> Bonny.Resource.apply_status(conn(), force: true)
+    
+    case result do
+      {:ok, updated_resource} ->
+        Logger.info("Successfully set manual wake-up override", 
+          schedule: Drowzee.K8s.SleepSchedule.name(sleep_schedule))
+        {:ok, updated_resource}
+      
+      {:error, error} ->
+        Logger.error("Failed to set manual wake-up override", 
+          schedule: Drowzee.K8s.SleepSchedule.name(sleep_schedule),
+          error: inspect(error))
+        {:error, error}
+    end
   end
 
   def manual_sleep(sleep_schedule) do
-    Drowzee.K8s.SleepSchedule.put_condition(
-      sleep_schedule,
-      "ManualOverride",
-      true,
-      "Sleep",
-      "Force deployments to sleep"
-    )
-    # Make sure we handle the modify event rather then wait for a reconcile
-    |> decrement_observed_generation()
-    |> Bonny.Resource.apply_status(conn(), force: true)
+    result = 
+      Drowzee.K8s.SleepSchedule.put_condition(
+        sleep_schedule,
+        "ManualOverride",
+        true,
+        "Sleep",
+        "Force deployments to sleep"
+      )
+      # Make sure we handle the modify event rather then wait for a reconcile
+      |> decrement_observed_generation()
+      |> Bonny.Resource.apply_status(conn(), force: true)
+    
+    case result do
+      {:ok, updated_resource} ->
+        Logger.info("Successfully set manual sleep override", 
+          schedule: Drowzee.K8s.SleepSchedule.name(sleep_schedule))
+        {:ok, updated_resource}
+      
+      {:error, error} ->
+        Logger.error("Failed to set manual sleep override", 
+          schedule: Drowzee.K8s.SleepSchedule.name(sleep_schedule),
+          error: inspect(error))
+        {:error, error}
+    end
   end
 
   def remove_override(sleep_schedule) do
-    Drowzee.K8s.SleepSchedule.put_condition(
-      sleep_schedule,
-      "ManualOverride",
-      false,
-      "NoOverride",
-      "No manual override in effect"
-    )
-    # Make sure we handle the modify event rather then wait for a reconcile
-    |> decrement_observed_generation()
-    |> Bonny.Resource.apply_status(conn(), force: true)
+    result = 
+      Drowzee.K8s.SleepSchedule.put_condition(
+        sleep_schedule,
+        "ManualOverride",
+        false,
+        "NoOverride",
+        "No manual override in effect"
+      )
+      # Make sure we handle the modify event rather then wait for a reconcile
+      |> decrement_observed_generation()
+      |> Bonny.Resource.apply_status(conn(), force: true)
+    
+    case result do
+      {:ok, updated_resource} ->
+        Logger.info("Successfully removed manual override", 
+          schedule: Drowzee.K8s.SleepSchedule.name(sleep_schedule))
+        {:ok, updated_resource}
+      
+      {:error, error} ->
+        Logger.error("Failed to remove manual override", 
+          schedule: Drowzee.K8s.SleepSchedule.name(sleep_schedule),
+          error: inspect(error))
+        {:error, error}
+    end
   end
 
   def decrement_observed_generation(resource) do
