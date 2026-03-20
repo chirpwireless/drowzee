@@ -1,0 +1,38 @@
+{{- range .Values.httpRoutes }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "drowzee.fullname" $ }}{{ if .nameSuffix }}-{{ .nameSuffix }}{{ end }}
+  labels:
+    {{- include "drowzee.labels" $ | nindent 4 }}
+  {{- with .annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    {{- range .parentRefs }}
+    - name: {{ .name }}
+      namespace: {{ .namespace }}
+      {{- with .sectionName }}
+      sectionName: {{ . }}
+      {{- end }}
+    {{- end }}
+  hostnames:
+    {{- range .hostnames }}
+    - {{ . | quote }}
+    {{- end }}
+  rules:
+    {{- range .rules }}
+    - matches:
+        {{- range .matches }}
+        - path:
+            type: {{ .pathType | default "PathPrefix" }}
+            value: {{ .path }}
+        {{- end }}
+      backendRefs:
+        - name: {{ .serviceName | default (include "drowzee.fullname" $) }}
+          port: {{ .servicePort }}
+    {{- end }}
+---
+{{- end }}
