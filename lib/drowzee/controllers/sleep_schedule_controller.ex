@@ -454,9 +454,9 @@ defmodule Drowzee.Controller.SleepScheduleController do
   end
 
   defp check_application_status(axn, check_fn) do
-    with {:ok, deployments} <- SleepSchedule.get_deployments(axn.resource),
-         {:ok, statefulsets} <- SleepSchedule.get_statefulsets(axn.resource),
-         {:ok, cronjobs} <- SleepSchedule.get_cronjobs(axn.resource) do
+    with {:ok, deployments} <- normalize_resource_result(SleepSchedule.get_deployments(axn.resource)),
+         {:ok, statefulsets} <- normalize_resource_result(SleepSchedule.get_statefulsets(axn.resource)),
+         {:ok, cronjobs} <- normalize_resource_result(SleepSchedule.get_cronjobs(axn.resource)) do
       deployments_result =
         Enum.all?(deployments, fn deployment ->
           Logger.debug(
@@ -516,6 +516,14 @@ defmodule Drowzee.Controller.SleepScheduleController do
       {:error, error} -> {:error, error}
     end
   end
+
+  defp normalize_resource_result({:ok, resources}), do: {:ok, resources}
+  defp normalize_resource_result({:partial, found_resources, missing_resources}) do
+    missing_names = Enum.map(missing_resources, fn r -> "#{r["kind"]}/#{r["name"]}" end)
+    Logger.warning("Some resources not found: #{Enum.join(missing_names, ", ")}")
+    {:error, missing_resources}
+  end
+  defp normalize_resource_result({:error, error}), do: {:error, error}
 
   defp complete_sleep_transition(axn, opts) do
     Logger.info("Sleep transition complete")
@@ -617,12 +625,12 @@ defmodule Drowzee.Controller.SleepScheduleController do
         axn
 
       {:error, error} ->
-        Logger.error("Failed to remove manual override - override will persist", 
+        Logger.error("Failed to remove manual override - override will persist",
           schedule: Drowzee.K8s.SleepSchedule.name(sleep_schedule),
           error: inspect(error))
         # Set an error condition to indicate the problem
         axn
-        |> set_condition("Error", true, "OverrideRemovalFailed", 
+        |> set_condition("Error", true, "OverrideRemovalFailed",
              "Failed to remove manual override: #{inspect(error)}")
     end
   end
