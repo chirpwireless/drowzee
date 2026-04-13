@@ -137,6 +137,108 @@ defmodule Drowzee.K8s.SleepScheduleTest do
     end
   end
 
+  describe "name/1 and namespace/1" do
+    test "extracts name and namespace" do
+      schedule = build_schedule(%{})
+      assert SleepSchedule.name(schedule) == "test-schedule"
+      assert SleepSchedule.namespace(schedule) == "test-ns"
+    end
+  end
+
+  describe "schedule_key/1" do
+    test "returns namespace/name" do
+      schedule = build_schedule(%{})
+      assert SleepSchedule.schedule_key(schedule) == "test-ns/test-schedule"
+    end
+  end
+
+  describe "deployment_names/1" do
+    test "extracts deployment names" do
+      schedule = build_schedule(%{"deployments" => [%{"name" => "a"}, %{"name" => "b"}]})
+      assert SleepSchedule.deployment_names(schedule) == ["a", "b"]
+    end
+
+    test "returns empty list when nil" do
+      schedule = build_schedule(%{"deployments" => nil})
+      assert SleepSchedule.deployment_names(schedule) == []
+    end
+  end
+
+  describe "statefulset_names/1" do
+    test "extracts statefulset names" do
+      schedule = build_schedule(%{"statefulsets" => [%{"name" => "sts-a"}]})
+      assert SleepSchedule.statefulset_names(schedule) == ["sts-a"]
+    end
+
+    test "returns empty list when nil" do
+      schedule = build_schedule(%{"statefulsets" => nil})
+      assert SleepSchedule.statefulset_names(schedule) == []
+    end
+  end
+
+  describe "is_wildcard_name?/1" do
+    test "true for names ending with *" do
+      assert SleepSchedule.is_wildcard_name?("prefix-*")
+    end
+
+    test "false for regular names" do
+      refute SleepSchedule.is_wildcard_name?("my-cronjob")
+    end
+  end
+
+  describe "get_wildcard_prefix/1" do
+    test "strips trailing *" do
+      assert SleepSchedule.get_wildcard_prefix("prefix-*") == "prefix-"
+    end
+  end
+
+  describe "conditions" do
+    test "put_condition and get_condition round-trip" do
+      schedule = build_schedule(%{})
+      schedule = SleepSchedule.put_condition(schedule, "Sleeping", true, "Naptime", "It's bedtime")
+
+      condition = SleepSchedule.get_condition(schedule, "Sleeping")
+      assert condition["type"] == "Sleeping"
+      assert condition["status"] == "True"
+      assert condition["reason"] == "Naptime"
+    end
+
+    test "get_condition returns nil when not set" do
+      schedule = build_schedule(%{})
+      assert SleepSchedule.get_condition(schedule, "Sleeping") == nil
+    end
+  end
+
+  describe "is_sleeping?/1" do
+    test "true when Sleeping condition is True" do
+      schedule =
+        build_schedule(%{})
+        |> SleepSchedule.put_condition("Sleeping", true, "Naptime", "Sleeping")
+
+      assert SleepSchedule.is_sleeping?(schedule)
+    end
+
+    test "false when Sleeping condition is False" do
+      schedule =
+        build_schedule(%{})
+        |> SleepSchedule.put_condition("Sleeping", false, "Awake", "Not sleeping")
+
+      refute SleepSchedule.is_sleeping?(schedule)
+    end
+
+    test "false when no Sleeping condition" do
+      schedule = build_schedule(%{})
+      refute SleepSchedule.is_sleeping?(schedule)
+    end
+  end
+
+  describe "get_valid_dependencies/1" do
+    test "returns ok with empty deps when no needs" do
+      schedule = build_schedule(%{})
+      assert {:ok, []} = SleepSchedule.get_valid_dependencies(schedule)
+    end
+  end
+
   defp build_schedule(spec_overrides) do
     base_spec = %{
       "deployments" => [],
