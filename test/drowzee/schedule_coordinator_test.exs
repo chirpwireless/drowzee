@@ -5,8 +5,19 @@ defmodule Drowzee.ScheduleCoordinatorTest do
   alias Drowzee.ScheduleCoordinator
 
   @test_schedule %{
-    "metadata" => %{"name" => "test", "namespace" => "test-ns"},
-    "spec" => %{"deployments" => [%{"name" => "dep-a"}]}
+    "apiVersion" => "drowzee.challengr.io/v1beta1",
+    "kind" => "SleepSchedule",
+    "metadata" => %{"name" => "test", "namespace" => "test-ns", "uid" => "sched-uid-123", "resourceVersion" => "1000", "generation" => 1},
+    "spec" => %{
+      "enabled" => true,
+      "sleepTime" => "23:00",
+      "wakeTime" => "08:00",
+      "timezone" => "UTC",
+      "dayOfWeek" => "*",
+      "deployments" => [%{"name" => "dep-a"}],
+      "statefulsets" => [],
+      "cronjobs" => []
+    }
   }
 
   @test_names %{deployments: ["dep-a"], statefulsets: [], cronjobs: []}

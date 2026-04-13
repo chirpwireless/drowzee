@@ -12,6 +12,7 @@ defmodule Drowzee.Controller.SleepScheduleControllerTest do
       "name" => "test-schedule",
       "namespace" => "default",
       "uid" => "test-uid",
+      "resourceVersion" => "1000",
       "generation" => 1
     },
     "spec" => %{
@@ -19,7 +20,10 @@ defmodule Drowzee.Controller.SleepScheduleControllerTest do
       "sleepTime" => "23:00",
       "wakeTime" => "08:00",
       "timezone" => "UTC",
-      "deployments" => [%{"name" => "test-dep"}]
+      "dayOfWeek" => "*",
+      "deployments" => [%{"name" => "test-dep"}],
+      "statefulsets" => [],
+      "cronjobs" => []
     }
   }
 

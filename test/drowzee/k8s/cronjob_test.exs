@@ -5,13 +5,20 @@ defmodule Drowzee.K8s.CronJobTest do
 
   defp build_cronjob(suspend, annotations \\ %{}) do
     %{
+      "apiVersion" => "batch/v1",
       "kind" => "CronJob",
       "metadata" => %{
         "name" => "test-cj",
         "namespace" => "test-ns",
+        "uid" => "cj-uid-123",
+        "resourceVersion" => "1000",
         "annotations" => annotations
       },
-      "spec" => %{"suspend" => suspend}
+      "spec" => %{
+        "suspend" => suspend,
+        "schedule" => "0 2 * * *",
+        "jobTemplate" => %{"spec" => %{"template" => %{"spec" => %{"containers" => []}}}}
+      }
     }
   end
 

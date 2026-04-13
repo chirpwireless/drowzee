@@ -5,14 +5,26 @@ defmodule Drowzee.K8s.DeploymentTest do
 
   defp build_deployment(replicas, annotations \\ %{}) do
     %{
+      "apiVersion" => "apps/v1",
       "kind" => "Deployment",
       "metadata" => %{
         "name" => "test-dep",
         "namespace" => "test-ns",
+        "uid" => "dep-uid-123",
+        "resourceVersion" => "1000",
+        "generation" => 1,
         "annotations" => annotations
       },
-      "spec" => %{"replicas" => replicas},
-      "status" => %{"readyReplicas" => replicas}
+      "spec" => %{
+        "replicas" => replicas,
+        "selector" => %{"matchLabels" => %{"app" => "test"}}
+      },
+      "status" => %{
+        "replicas" => replicas,
+        "readyReplicas" => replicas,
+        "availableReplicas" => replicas,
+        "observedGeneration" => 1
+      }
     }
   end
 

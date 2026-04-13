@@ -5,14 +5,25 @@ defmodule Drowzee.K8s.StatefulSetTest do
 
   defp build_statefulset(replicas, annotations \\ %{}) do
     %{
+      "apiVersion" => "apps/v1",
       "kind" => "StatefulSet",
       "metadata" => %{
         "name" => "test-sts",
         "namespace" => "test-ns",
+        "uid" => "sts-uid-123",
+        "resourceVersion" => "1000",
+        "generation" => 1,
         "annotations" => annotations
       },
-      "spec" => %{"replicas" => replicas},
-      "status" => %{"readyReplicas" => replicas}
+      "spec" => %{
+        "replicas" => replicas,
+        "selector" => %{"matchLabels" => %{"app" => "test"}}
+      },
+      "status" => %{
+        "replicas" => replicas,
+        "readyReplicas" => replicas,
+        "observedGeneration" => 1
+      }
     }
   end
 

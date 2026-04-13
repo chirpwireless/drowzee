@@ -7,37 +7,48 @@ defmodule Drowzee.K8s.ResourceUtilsTest do
 
   defp build_deployment(replicas, annotations \\ %{}) do
     %{
+      "apiVersion" => "apps/v1",
       "kind" => "Deployment",
       "metadata" => %{
         "name" => "test-dep",
         "namespace" => "test-ns",
+        "uid" => "dep-uid-123",
+        "resourceVersion" => "1000",
         "annotations" => annotations
       },
-      "spec" => %{"replicas" => replicas}
+      "spec" => %{"replicas" => replicas},
+      "status" => %{"replicas" => replicas, "readyReplicas" => replicas}
     }
   end
 
   defp build_statefulset(replicas, annotations \\ %{}) do
     %{
+      "apiVersion" => "apps/v1",
       "kind" => "StatefulSet",
       "metadata" => %{
         "name" => "test-sts",
         "namespace" => "test-ns",
+        "uid" => "sts-uid-123",
+        "resourceVersion" => "1000",
         "annotations" => annotations
       },
-      "spec" => %{"replicas" => replicas}
+      "spec" => %{"replicas" => replicas},
+      "status" => %{"replicas" => replicas, "readyReplicas" => replicas}
     }
   end
 
   defp build_cronjob(suspend) do
     %{
+      "apiVersion" => "batch/v1",
       "kind" => "CronJob",
       "metadata" => %{
         "name" => "test-cj",
         "namespace" => "test-ns",
+        "uid" => "cj-uid-123",
+        "resourceVersion" => "1000",
         "annotations" => %{}
       },
-      "spec" => %{"suspend" => suspend}
+      "spec" => %{"suspend" => suspend, "schedule" => "0 2 * * *"}
     }
   end
 
