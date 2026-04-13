@@ -34,7 +34,7 @@ defmodule Drowzee.MixProject do
   defp deps do
     [
       {:retry, "~> 0.19"},
-      {:igniter, "~> 0.5", only: [:dev, :test]},
+      # {:igniter, "~> 0.5", only: [:dev, :test]},  # disabled: incompatible with OTP 28
       {:phoenix, "~> 1.7.19"},
       {:phoenix_html, "~> 4.1"},
       {:phoenix_live_reload, "~> 1.2", only: :dev},

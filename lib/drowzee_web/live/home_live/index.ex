@@ -463,6 +463,13 @@ defmodule DrowzeeWeb.HomeLive.Index do
     # Precompute dependency relationships
     dependency_data = precompute_dependency_data(sleep_schedules)
 
+    # Compute priority groups for detail view
+    priority_groups =
+      case sleep_schedules do
+        [schedule] -> Drowzee.K8s.SleepSchedule.resources_by_priority_groups(schedule)
+        _ -> []
+      end
+
     socket
     |> assign(:sleep_schedules, sleep_schedules)
     |> assign(:all_namespaces, all_namespaces)
@@ -474,6 +481,7 @@ defmodule DrowzeeWeb.HomeLive.Index do
     |> assign(:missing_resources, missing_resources)
     |> assign(:resolved_wildcard_names, resolved_wildcard_names)
     |> assign(:dependency_data, dependency_data)
+    |> assign(:priority_groups, priority_groups)
     |> assign(:loading, false)
     |> filter_sleep_schedules(socket.assigns.search)
   end

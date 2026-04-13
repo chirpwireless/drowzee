@@ -169,20 +169,48 @@ defmodule Drowzee.SleepChecker do
 
   defp parse_time(time_str, date, timezone) do
     # Try 24-hour format first (HH:MM)
-    case Timex.parse(time_str, "%H:%M", :strftime) do
-      {:ok, time} ->
-        datetime = DateTime.new!(date, Time.new!(time.hour, time.minute, 0), timezone)
-        {:ok, datetime}
+    case Regex.run(~r/^(\d{1,2}):(\d{2})$/, time_str) do
+      [_, h, m] ->
+        hour = String.to_integer(h)
+        minute = String.to_integer(m)
 
-      {:error, _} ->
-        # Fall back to 12-hour format with AM/PM (H:MMAM/PM)
-        case Timex.parse(time_str, "%-I:%M%p", :strftime) do
-          {:ok, time} ->
-            datetime = DateTime.new!(date, Time.new!(time.hour, time.minute, 0), timezone)
-            {:ok, datetime}
+        if hour in 0..23 and minute in 0..59 do
+          datetime = DateTime.new!(date, Time.new!(hour, minute, 0), timezone)
+          {:ok, datetime}
+        else
+          {:error, "Invalid 24-hour time: #{time_str}"}
+        end
 
-          {:error, error} ->
-            {:error, error}
+      nil ->
+        # Fall back to 12-hour format with AM/PM (H:MMam/pm)
+        case Regex.run(~r/^(\d{1,2}):(\d{2})(am|pm)$/i, time_str) do
+          [_, h, m, period] ->
+            hour = String.to_integer(h)
+            minute = String.to_integer(m)
+            period = String.downcase(period)
+
+            cond do
+              hour < 1 or hour > 12 ->
+                {:error, "Expected `hour between 1 and 12` at line 1, column 1."}
+
+              minute > 59 ->
+                {:error, "Expected `minute` at line 1, column 4."}
+
+              true ->
+                hour24 =
+                  case {period, hour} do
+                    {"am", 12} -> 0
+                    {"am", _} -> hour
+                    {"pm", 12} -> 12
+                    {"pm", _} -> hour + 12
+                  end
+
+                datetime = DateTime.new!(date, Time.new!(hour24, minute, 0), timezone)
+                {:ok, datetime}
+            end
+
+          nil ->
+            {:error, "Expected `hour between 1 and 12` at line 1, column 1."}
         end
     end
   end

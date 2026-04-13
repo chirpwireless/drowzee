@@ -68,6 +68,9 @@ spec:
                     properties:
                       name:
                         type: string
+                      priority:
+                        type: string
+                        description: Priority group name for this resource
                 statefulsets:
                   type: array
                   description: The statefulsets that will be slept/woken.
@@ -78,6 +81,9 @@ spec:
                     properties:
                       name:
                         type: string
+                      priority:
+                        type: string
+                        description: Priority group name for this resource
                 cronjobs:
                   type: array
                   description: The cronjobs that will be suspended/resumed.
@@ -88,6 +94,29 @@ spec:
                     properties:
                       name:
                         type: string
+                      priority:
+                        type: string
+                        description: Priority group name for this resource
+                priorityGroups:
+                  type: array
+                  description: Ordered list of priority groups. Resources wake in this order, sleep in reverse.
+                  items:
+                    type: object
+                    required:
+                      - name
+                      - timeoutSeconds
+                    properties:
+                      name:
+                        type: string
+                        description: Priority group name, referenced by resource priority field
+                      timeoutSeconds:
+                        type: integer
+                        description: Fixed wait seconds (waitForReady=false) or max timeout seconds (waitForReady=true)
+                        minimum: 0
+                      waitForReady:
+                        type: boolean
+                        description: If true, poll resource readiness instead of fixed wait. timeoutSeconds becomes max timeout.
+                        default: false
                 needs:
                   type: array
                   description: List of other SleepSchedules that this schedule depends on. Dependencies will be woken up first during manual wake-up operations.

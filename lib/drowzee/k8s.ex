@@ -29,62 +29,27 @@ defmodule Drowzee.K8s do
   end
 
   def manual_wake_up(sleep_schedule) do
-    # First, process any dependencies for this schedule
-    case Drowzee.K8s.SleepSchedule.get_valid_dependencies(sleep_schedule) do
-      {:ok, dependencies} ->
-        if Enum.empty?(dependencies) do
-          # No dependencies, proceed with normal wake-up
-          Logger.debug("No dependencies found, proceeding with wake-up",
-            schedule: Drowzee.K8s.SleepSchedule.name(sleep_schedule)
-          )
-          do_manual_wake_up(sleep_schedule)
-        else
-          # Wake up dependencies first
-          Logger.info("Waking up #{length(dependencies)} dependencies before main schedule",
-            schedule: Drowzee.K8s.SleepSchedule.name(sleep_schedule),
-            dependencies: Enum.map(dependencies, &"#{Drowzee.K8s.SleepSchedule.namespace(&1)}/#{Drowzee.K8s.SleepSchedule.name(&1)}")
-          )
+    # Set ManualOverride on all dependencies + main schedule (fire-and-forget)
+    # The controller will handle the actual wake-up sequence via initiate_wake_up + needs
+    {:ok, dependencies} = Drowzee.K8s.SleepSchedule.get_valid_dependencies(sleep_schedule)
 
-          # Wake up each dependency (they will be processed with higher priority)
-          dependency_results =
-            dependencies
-            |> Enum.map(fn dep_schedule ->
-              Logger.debug("Waking up dependency",
-                dependency: "#{Drowzee.K8s.SleepSchedule.namespace(dep_schedule)}/#{Drowzee.K8s.SleepSchedule.name(dep_schedule)}"
-              )
-              do_manual_wake_up(dep_schedule)
-            end)
+    Enum.each(dependencies, &do_manual_wake_up/1)
 
-          # Check if any dependencies failed
-          failed_deps =
-            dependency_results
-            |> Enum.with_index()
-            |> Enum.filter(fn {{status, _}, _idx} -> status == :error end)
+    # Return result of main schedule override for LiveView UI update
+    do_manual_wake_up(sleep_schedule)
+  end
 
-          if not Enum.empty?(failed_deps) do
-            Logger.warning("Some dependencies failed to wake up, but continuing with main schedule",
-              schedule: Drowzee.K8s.SleepSchedule.name(sleep_schedule),
-              failed_count: length(failed_deps)
-            )
-          end
-
-          # Now wake up the main schedule
-          Logger.debug("Waking up main schedule after dependencies",
-            schedule: Drowzee.K8s.SleepSchedule.name(sleep_schedule)
-          )
-          do_manual_wake_up(sleep_schedule)
-        end
-
-      {:error, reason} ->
-        Logger.warning("Failed to fetch dependencies, proceeding with wake-up anyway: #{inspect(reason)}",
-          schedule: Drowzee.K8s.SleepSchedule.name(sleep_schedule)
-        )
-        do_manual_wake_up(sleep_schedule)
-    end
+  @doc """
+  Sets ManualOverride on a dependency schedule to trigger wake-up.
+  Idempotent: if ManualOverride is already set, the patch is harmless.
+  Called from the controller in initiate_wake_up/check_wake_up_transition.
+  """
+  def trigger_dependency_wake(dep_schedule) do
+    do_manual_wake_up(dep_schedule)
   end
 
   defp do_manual_wake_up(sleep_schedule) do
-    result = 
+    result =
       Drowzee.K8s.SleepSchedule.put_condition(
         sleep_schedule,
         "ManualOverride",
@@ -95,15 +60,15 @@ defmodule Drowzee.K8s do
       # Make sure we handle the modify event rather then wait for a reconcile
       |> decrement_observed_generation()
       |> Bonny.Resource.apply_status(conn(), force: true)
-    
+
     case result do
       {:ok, updated_resource} ->
-        Logger.info("Successfully set manual wake-up override", 
+        Logger.info("Successfully set manual wake-up override",
           schedule: Drowzee.K8s.SleepSchedule.name(sleep_schedule))
         {:ok, updated_resource}
-      
+
       {:error, error} ->
-        Logger.error("Failed to set manual wake-up override", 
+        Logger.error("Failed to set manual wake-up override",
           schedule: Drowzee.K8s.SleepSchedule.name(sleep_schedule),
           error: inspect(error))
         {:error, error}
@@ -111,7 +76,7 @@ defmodule Drowzee.K8s do
   end
 
   def manual_sleep(sleep_schedule) do
-    result = 
+    result =
       Drowzee.K8s.SleepSchedule.put_condition(
         sleep_schedule,
         "ManualOverride",
@@ -122,15 +87,15 @@ defmodule Drowzee.K8s do
       # Make sure we handle the modify event rather then wait for a reconcile
       |> decrement_observed_generation()
       |> Bonny.Resource.apply_status(conn(), force: true)
-    
+
     case result do
       {:ok, updated_resource} ->
-        Logger.info("Successfully set manual sleep override", 
+        Logger.info("Successfully set manual sleep override",
           schedule: Drowzee.K8s.SleepSchedule.name(sleep_schedule))
         {:ok, updated_resource}
-      
+
       {:error, error} ->
-        Logger.error("Failed to set manual sleep override", 
+        Logger.error("Failed to set manual sleep override",
           schedule: Drowzee.K8s.SleepSchedule.name(sleep_schedule),
           error: inspect(error))
         {:error, error}
@@ -138,7 +103,7 @@ defmodule Drowzee.K8s do
   end
 
   def remove_override(sleep_schedule) do
-    result = 
+    result =
       Drowzee.K8s.SleepSchedule.put_condition(
         sleep_schedule,
         "ManualOverride",
@@ -149,15 +114,15 @@ defmodule Drowzee.K8s do
       # Make sure we handle the modify event rather then wait for a reconcile
       |> decrement_observed_generation()
       |> Bonny.Resource.apply_status(conn(), force: true)
-    
+
     case result do
       {:ok, updated_resource} ->
-        Logger.info("Successfully removed manual override", 
+        Logger.info("Successfully removed manual override",
           schedule: Drowzee.K8s.SleepSchedule.name(sleep_schedule))
         {:ok, updated_resource}
-      
+
       {:error, error} ->
-        Logger.error("Failed to remove manual override", 
+        Logger.error("Failed to remove manual override",
           schedule: Drowzee.K8s.SleepSchedule.name(sleep_schedule),
           error: inspect(error))
         {:error, error}

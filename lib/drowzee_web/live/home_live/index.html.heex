@@ -595,6 +595,22 @@
             id={"resources-#{schedule_id}"}
             style={if is_visible || @name != nil, do: "", else: "display: none;"}
           >
+            <%= if @priority_groups != [] and @name != nil do %>
+              <div class="mt-4 mb-2 flex flex-wrap gap-2 items-center">
+                <span class="text-sm font-medium text-gray-500">Priority Groups:</span>
+                <%= for group <- @priority_groups do %>
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                    {group.name || "default"}
+                    <%= if group.wait_for_ready do %>
+                      <span class="bg-green-100 text-green-700 px-1 rounded">wait for ready</span>
+                    <% end %>
+                    <%= if group.timeout_ms > 0 do %>
+                      <span class="bg-gray-200 text-gray-600 px-1 rounded">{div(group.timeout_ms, 1000)}s</span>
+                    <% end %>
+                  </span>
+                <% end %>
+              </div>
+            <% end %>
             <%= if sleep_schedule["spec"]["deployments"] != [] do %>
               <div class="mt-4">
                 <h3 class="text-lg font-medium text-gray-700 mb-2">📦 Deployments:</h3>

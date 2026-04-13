@@ -9,9 +9,7 @@ defmodule Drowzee.K8s.StatefulSet do
 
   def ready_replicas(statefulset), do: statefulset["status"]["readyReplicas"] || 0
 
-  @doc """
-  Add the managed-by annotation to track which SleepSchedule manages this resource.
-  """
+  # Add the managed-by annotation to track which SleepSchedule manages this resource.
   defp add_managed_by_annotation(statefulset, sleep_schedule_key) do
     if sleep_schedule_key do
       annotations = get_in(statefulset, ["metadata", "annotations"]) || %{}

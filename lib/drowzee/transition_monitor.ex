@@ -14,8 +14,8 @@ defmodule Drowzee.TransitionMonitor do
 
   # Increased from 5000ms to 10000ms for more time between checks
   @check_interval 10000
-  # Increased from 5 to 30 attempts for longer monitoring
-  @max_attempts 30
+  # 60 attempts × 10s = 10 minutes. Covers priority groups (3 × 120s max) + deps + scaling.
+  @max_attempts 60
 
   def start_transition_monitor(name, namespace) do
     Logger.info("Monitoring transition...")

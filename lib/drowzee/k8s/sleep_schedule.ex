@@ -275,6 +275,148 @@ defmodule Drowzee.K8s.SleepSchedule do
     end
   end
 
+  @doc """
+  Разбивает ресурсы schedule на группы по priorityGroups.
+  Возвращает список групп в порядке priorityGroups + implicit default в конце.
+  Возвращает [] если priorityGroups не задан.
+  """
+  @spec resources_by_priority_groups(map()) :: [
+          %{
+            name: String.t() | nil,
+            timeout_ms: non_neg_integer(),
+            wait_for_ready: boolean(),
+            deployments: [String.t()],
+            statefulsets: [String.t()],
+            cronjobs: [String.t()]
+          }
+        ]
+  def resources_by_priority_groups(sleep_schedule) do
+    priority_groups = sleep_schedule["spec"]["priorityGroups"] || []
+
+    if Enum.empty?(priority_groups) do
+      []
+    else
+      raw_deployments = sleep_schedule["spec"]["deployments"] || []
+      raw_statefulsets = sleep_schedule["spec"]["statefulsets"] || []
+      raw_cronjobs = sleep_schedule["spec"]["cronjobs"] || []
+
+      # Build named groups from priorityGroups spec
+      named_groups =
+        Enum.map(priority_groups, fn pg ->
+          group_name = pg["name"]
+
+          %{
+            name: group_name,
+            timeout_ms: (pg["timeoutSeconds"] || 0) * 1_000,
+            wait_for_ready: pg["waitForReady"] || false,
+            deployments: raw_deployments |> Enum.filter(&(&1["priority"] == group_name)) |> Enum.map(& &1["name"]),
+            statefulsets: raw_statefulsets |> Enum.filter(&(&1["priority"] == group_name)) |> Enum.map(& &1["name"]),
+            cronjobs: raw_cronjobs |> Enum.filter(&(&1["priority"] == group_name)) |> Enum.map(& &1["name"])
+          }
+        end)
+
+      # Collect resources without priority → implicit default group
+      default_deployments = raw_deployments |> Enum.filter(&is_nil(&1["priority"])) |> Enum.map(& &1["name"])
+      default_statefulsets = raw_statefulsets |> Enum.filter(&is_nil(&1["priority"])) |> Enum.map(& &1["name"])
+      default_cronjobs = raw_cronjobs |> Enum.filter(&is_nil(&1["priority"])) |> Enum.map(& &1["name"])
+
+      default_group = %{
+        name: nil,
+        timeout_ms: 0,
+        wait_for_ready: false,
+        deployments: default_deployments,
+        statefulsets: default_statefulsets,
+        cronjobs: default_cronjobs
+      }
+
+      all_groups = named_groups ++ [default_group]
+
+      # Skip empty groups (no resources)
+      Enum.reject(all_groups, fn g ->
+        Enum.empty?(g.deployments) and Enum.empty?(g.statefulsets) and Enum.empty?(g.cronjobs)
+      end)
+    end
+  end
+
+  @doc """
+  Масштабирует подмножество ресурсов schedule вверх (одну priority group).
+  Принимает sleep_schedule + map с именами ресурсов.
+  """
+  def scale_up_group(sleep_schedule, %{deployments: dep_names, statefulsets: sts_names, cronjobs: cj_names}) do
+    namespace = namespace(sleep_schedule)
+    key = schedule_key(sleep_schedule)
+
+    dep_results = scale_named_resources(dep_names, namespace, &Drowzee.K8s.get_deployment/2, fn r -> Drowzee.K8s.Deployment.scale_up(r, key) end)
+    sts_results = scale_named_resources(sts_names, namespace, &Drowzee.K8s.get_statefulset/2, &Drowzee.K8s.StatefulSet.scale_up/1)
+    cj_results = scale_named_cronjobs(cj_names, namespace, fn cronjob -> CronJob.suspend(cronjob, false, key) end)
+
+    merge_group_results([dep_results, sts_results, cj_results])
+  end
+
+  @doc """
+  Масштабирует подмножество ресурсов schedule вниз (одну priority group).
+  Принимает sleep_schedule + map с именами ресурсов.
+  """
+  def scale_down_group(sleep_schedule, %{deployments: dep_names, statefulsets: sts_names, cronjobs: cj_names}) do
+    namespace = namespace(sleep_schedule)
+    key = schedule_key(sleep_schedule)
+
+    dep_results = scale_named_resources(dep_names, namespace, &Drowzee.K8s.get_deployment/2, fn r -> Drowzee.K8s.Deployment.scale_down(r, key) end)
+    sts_results = scale_named_resources(sts_names, namespace, &Drowzee.K8s.get_statefulset/2, fn r -> Drowzee.K8s.StatefulSet.scale_down(r, key) end)
+    cj_results = scale_named_cronjobs(cj_names, namespace, fn cronjob -> CronJob.suspend(cronjob, true, key) end)
+
+    merge_group_results([dep_results, sts_results, cj_results])
+  end
+
+  defp scale_named_resources(names, namespace, get_fn, scale_fn) do
+    Enum.reduce(names, {[], []}, fn name, {ok_acc, err_acc} ->
+      case get_fn.(name, namespace) do
+        {:ok, resource} ->
+          case scale_fn.(resource) do
+            {:ok, scaled} -> {[scaled | ok_acc], err_acc}
+            {:error, _resource, msg} -> {ok_acc, [{name, msg} | err_acc]}
+          end
+
+        {:error, reason} ->
+          {ok_acc, [{name, "Not found: #{inspect(reason)}"} | err_acc]}
+      end
+    end)
+  end
+
+  defp scale_named_cronjobs(names, namespace, operation_fn) do
+    Enum.reduce(names, {[], []}, fn name, {ok_acc, err_acc} ->
+      name_info = %{"name" => name, "is_wildcard" => is_wildcard_name?(name)}
+
+      case Drowzee.K8s.get_cronjob_with_wildcard(name_info, namespace) do
+        {:ok, cronjob, _resolved_name} ->
+          do_cronjob_op(cronjob, operation_fn, ok_acc, err_acc, name)
+
+        {:error, reason} ->
+          {ok_acc, [{name, "Not found: #{inspect(reason)}"} | err_acc]}
+      end
+    end)
+  end
+
+  defp do_cronjob_op(cronjob, operation_fn, ok_acc, err_acc, name) do
+    case operation_fn.(cronjob) do
+      {:ok, processed} -> {[processed | ok_acc], err_acc}
+      {:error, _resource, msg} -> {ok_acc, [{name, msg} | err_acc]}
+    end
+  end
+
+  defp merge_group_results(results_list) do
+    {all_ok, all_err} =
+      Enum.reduce(results_list, {[], []}, fn {ok, err}, {ok_acc, err_acc} ->
+        {ok_acc ++ ok, err_acc ++ err}
+      end)
+
+    cond do
+      Enum.empty?(all_err) -> {:ok, all_ok}
+      Enum.empty?(all_ok) -> {:error, all_err}
+      true -> {:partial, all_ok, all_err}
+    end
+  end
+
   def scale_down_deployments(sleep_schedule) do
     Logger.debug("Scaling down deployments...")
 

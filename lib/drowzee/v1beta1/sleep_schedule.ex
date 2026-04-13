@@ -64,7 +64,8 @@ defmodule Drowzee.API.V1Beta1.SleepSchedule do
                     type: :object,
                     required: [:name],
                     properties: %{
-                      name: %{type: :string}
+                      name: %{type: :string},
+                      priority: %{type: :string, description: "Priority group name for this resource"}
                     }
                   }
                 },
@@ -75,7 +76,8 @@ defmodule Drowzee.API.V1Beta1.SleepSchedule do
                     type: :object,
                     required: [:name],
                     properties: %{
-                      name: %{type: :string}
+                      name: %{type: :string},
+                      priority: %{type: :string, description: "Priority group name for this resource"}
                     }
                   }
                 },
@@ -86,7 +88,21 @@ defmodule Drowzee.API.V1Beta1.SleepSchedule do
                     type: :object,
                     required: [:name],
                     properties: %{
-                      name: %{type: :string}
+                      name: %{type: :string},
+                      priority: %{type: :string, description: "Priority group name for this resource"}
+                    }
+                  }
+                },
+                priorityGroups: %{
+                  type: :array,
+                  description: "Ordered list of priority groups. Resources wake in this order, sleep in reverse.",
+                  items: %{
+                    type: :object,
+                    required: [:name, :timeoutSeconds],
+                    properties: %{
+                      name: %{type: :string, description: "Priority group name, referenced by resource priority field"},
+                      timeoutSeconds: %{type: :integer, description: "Fixed wait seconds (waitForReady=false) or max timeout seconds (waitForReady=true)", minimum: 0},
+                      waitForReady: %{type: :boolean, description: "If true, poll resource readiness instead of fixed wait. timeoutSeconds becomes max timeout.", default: false}
                     }
                   }
                 },

@@ -7,22 +7,31 @@ defmodule Drowzee.Application do
 
   @impl true
   def start(_type, _args) do
-    # We no longer initialize the coordinator directly here as it's managed by the supervisor
-    # Drowzee.Controller.SleepScheduleController.start_coordinator()
+    operator_children =
+      if Application.get_env(:drowzee, :start_operator, true) do
+        [
+          {Drowzee.Operator, conn: Drowzee.K8sConn.get!(), enable_leader_election: false},
+          Bonny.PeriodicTask
+        ]
+      else
+        []
+      end
 
-    children = [
-      DrowzeeWeb.Telemetry,
-      {DNSCluster, query: Application.get_env(:drowzee, :dns_cluster_query) || :ignore},
-      {Phoenix.PubSub, name: Drowzee.PubSub},
-      {Drowzee.Operator, conn: Drowzee.K8sConn.get!(), enable_leader_election: false},
-      Bonny.PeriodicTask,
+    children =
+      [
+        DrowzeeWeb.Telemetry,
+        {DNSCluster, query: Application.get_env(:drowzee, :dns_cluster_query) || :ignore},
+        {Phoenix.PubSub, name: Drowzee.PubSub}
+      ] ++
+        operator_children ++
+        [
+          # Per-schedule coordinator infrastructure
+          {Registry, keys: :unique, name: Drowzee.ScheduleRegistry},
+          {DynamicSupervisor, name: Drowzee.ScheduleSupervisor, strategy: :one_for_one},
 
-      # Add the CoordinatorSupervisor to manage the scaling coordinator
-      Drowzee.CoordinatorSupervisor,
-
-      # Start to serve requests, typically the last entry
-      DrowzeeWeb.Endpoint
-    ]
+          # Start to serve requests, typically the last entry
+          DrowzeeWeb.Endpoint
+        ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options

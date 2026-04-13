@@ -1,0 +1,32 @@
+# Example: SleepSchedule with priority groups
+# Critical resources (database) wake first, then applications, then default.
+# waitForReady ensures the database is fully ready before starting applications.
+apiVersion: drowzee.challengr.io/v1beta1
+kind: SleepSchedule
+metadata:
+  name: example-priority-groups
+  namespace: default
+spec:
+  enabled: true
+  sleepTime: "23:00"
+  wakeTime: "08:00"
+  timezone: "Europe/Moscow"
+  dayOfWeek: "1-5"
+  deployments:
+    - name: api-server
+      priority: application
+    - name: web-frontend
+      priority: application
+  statefulsets:
+    - name: postgresql
+      priority: critical
+    - name: redis
+      priority: critical
+  cronjobs:
+    - name: cleanup-job
+  priorityGroups:
+    - name: critical
+      waitForReady: true
+      timeoutSeconds: 120
+    - name: application
+      timeoutSeconds: 30

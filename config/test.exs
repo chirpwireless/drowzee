@@ -18,3 +18,4 @@ config :phoenix_live_view,
   enable_expensive_runtime_checks: true
 
 config :drowzee, Drowzee.K8sConn, method: :test
+config :drowzee, start_operator: false

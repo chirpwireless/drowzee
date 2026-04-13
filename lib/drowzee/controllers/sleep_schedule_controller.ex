@@ -25,6 +25,8 @@ defmodule Drowzee.Controller.SleepScheduleController do
     end
   end
 
+  def handle_event_enabled(%Bonny.Axn{action: :delete} = axn), do: axn
+
   def handle_event_enabled(%Bonny.Axn{action: action} = axn)
       when action in [:add, :modify, :reconcile] do
     Logger.metadata(
@@ -35,19 +37,13 @@ defmodule Drowzee.Controller.SleepScheduleController do
     axn
     |> add_default_conditions()
     |> set_naptime_assigns()
+    |> validate_priority_groups()
     |> update_state()
     # TODO: Only publish an event when something changes
     |> publish_event()
     |> success_event()
   end
 
-  # delete the resource
-  def handle_event_enabled(%Bonny.Axn{action: :delete} = axn, _opts) do
-    Logger.warning("Delete Action - Not yet implemented!")
-    # TODO:
-    # - Make sure applications are awake
-    axn
-  end
 
   defp publish_event(axn) do
     Task.start(fn ->
@@ -102,7 +98,7 @@ defmodule Drowzee.Controller.SleepScheduleController do
 
     # For schedules with nil wake time, check if they're already sleeping
     # If they are, keep them asleep regardless of sleep time changes
-    {manual_override_exists, manual_override_type} =
+    {manual_override_exists, _manual_override_type} =
       case get_condition(axn, "ManualOverride") do
         {:ok, condition} ->
           if condition["status"] == "True" do
@@ -257,10 +253,30 @@ defmodule Drowzee.Controller.SleepScheduleController do
   defp initiate_wake_up(axn) do
     Logger.info("Initiating wake up")
 
-    axn
-    |> set_condition("Transitioning", true, "WakingUp", "Waking up")
-    |> scale_up_applications()
-    |> start_transition_monitor()
+    resource = axn.resource
+
+    {:ok, deps} = SleepSchedule.get_valid_dependencies(resource)
+
+    # Trigger wake for sleeping dependencies (idempotent)
+    Enum.each(deps, fn dep ->
+      if SleepSchedule.is_sleeping?(dep) do
+        Drowzee.K8s.trigger_dependency_wake(dep)
+      end
+    end)
+
+    # Check if all deps are awake (non-blocking)
+    all_deps_awake = Enum.all?(deps, fn dep -> not SleepSchedule.is_sleeping?(dep) end)
+
+    if all_deps_awake do
+      axn
+      |> set_condition("Transitioning", true, "WakingUp", "Waking up")
+      |> scale_up_applications()
+      |> start_transition_monitor()
+    else
+      axn
+      |> set_condition("Transitioning", true, "WaitingForDependencies", "Waiting for dependencies to wake up")
+      |> start_transition_monitor()
+    end
   end
 
   defp start_transition_monitor(axn) do
@@ -272,44 +288,77 @@ defmodule Drowzee.Controller.SleepScheduleController do
     axn
   end
 
-  # Coordination mechanism for scaling operations with prioritization
-  # Uses an Agent to coordinate scaling operations across multiple schedules
-
-  # Start the coordinator when the application starts - this is now handled by CoordinatorSupervisor
-  def start_coordinator do
-    # This is kept for backwards compatibility but is now a no-op
-    # The actual coordinator is started by the CoordinatorSupervisor
-    :ok
-  end
-
-  # Add a scaling operation to the queue with priority
-  defp queue_scaling_operation(operation, resource, priority) do
-    Logger.info(
-      "Queueing operation #{operation} for #{resource["metadata"]["namespace"]}/#{resource["metadata"]["name"]} with priority #{priority}"
-    )
-
-    # Use GenServer.cast instead of Agent.update
-    GenServer.cast(
-      __MODULE__.Coordinator,
-      {:add_operation, operation, resource, priority}
-    )
-  end
-
-  # Prioritized scaling down: StatefulSets (1) -> Deployments (2) -> CronJobs (3)
   defp scale_down_applications(axn) do
-    # Queue operations with priority (lower number = higher priority)
-    queue_scaling_operation(:scale_down_statefulsets, axn.resource, 1)
-    queue_scaling_operation(:scale_down_deployments, axn.resource, 2)
-    queue_scaling_operation(:suspend_cronjobs, axn.resource, 3)
+    resource = axn.resource
+    ns = resource["metadata"]["namespace"]
+    name = resource["metadata"]["name"]
+    groups = SleepSchedule.resources_by_priority_groups(resource)
+
+    operations =
+      if groups == [] do
+        all_names = %{
+          deployments: SleepSchedule.deployment_names(resource),
+          statefulsets: SleepSchedule.statefulset_names(resource),
+          cronjobs: Enum.map(SleepSchedule.cronjob_names(resource), & &1["name"])
+        }
+
+        [{:scale_group, :down, resource, all_names}]
+      else
+        # Reverse order for sleep: default → application → critical
+        groups
+        |> Enum.reverse()
+        |> Enum.flat_map(fn group ->
+          names = %{deployments: group.deployments, statefulsets: group.statefulsets, cronjobs: group.cronjobs}
+
+          wait_op =
+            if group.wait_for_ready do
+              {:wait_for_ready, :down, resource, %{deployments: group.deployments, statefulsets: group.statefulsets}, group.timeout_ms}
+            else
+              {:wait_ms, group.timeout_ms}
+            end
+
+          [{:scale_group, :down, resource, names}, wait_op]
+        end)
+        |> Enum.drop(-1)
+      end
+
+    Drowzee.ScheduleCoordinator.start_or_enqueue(ns, name, operations)
     axn
   end
 
-  # Prioritized scaling up: StatefulSets (1) -> Deployments (2) -> CronJobs (3)
   defp scale_up_applications(axn) do
-    # Queue operations with priority (lower number = higher priority)
-    queue_scaling_operation(:scale_up_statefulsets, axn.resource, 1)
-    queue_scaling_operation(:scale_up_deployments, axn.resource, 2)
-    queue_scaling_operation(:resume_cronjobs, axn.resource, 3)
+    resource = axn.resource
+    ns = resource["metadata"]["namespace"]
+    name = resource["metadata"]["name"]
+    groups = SleepSchedule.resources_by_priority_groups(resource)
+
+    operations =
+      if groups == [] do
+        all_names = %{
+          deployments: SleepSchedule.deployment_names(resource),
+          statefulsets: SleepSchedule.statefulset_names(resource),
+          cronjobs: Enum.map(SleepSchedule.cronjob_names(resource), & &1["name"])
+        }
+
+        [{:scale_group, :up, resource, all_names}]
+      else
+        groups
+        |> Enum.flat_map(fn group ->
+          names = %{deployments: group.deployments, statefulsets: group.statefulsets, cronjobs: group.cronjobs}
+
+          wait_op =
+            if group.wait_for_ready do
+              {:wait_for_ready, :up, resource, %{deployments: group.deployments, statefulsets: group.statefulsets}, group.timeout_ms}
+            else
+              {:wait_ms, group.timeout_ms}
+            end
+
+          [{:scale_group, :up, resource, names}, wait_op]
+        end)
+        |> Enum.drop(-1)
+      end
+
+    Drowzee.ScheduleCoordinator.start_or_enqueue(ns, name, operations)
     axn
   end
 
@@ -359,25 +408,41 @@ defmodule Drowzee.Controller.SleepScheduleController do
   defp check_wake_up_transition(axn, opts) do
     Logger.info("Checking wake up transition...")
 
-    case check_application_status(axn, &application_status_ready?/3) do
-      {:ok, true} ->
-        Logger.debug("All applications are ready")
+    resource = axn.resource
 
-        axn
-        |> wake_up_ingress()
-        |> complete_wake_up_transition(opts)
+    {:ok, deps} = SleepSchedule.get_valid_dependencies(resource)
 
-      {:ok, false} ->
-        Logger.debug("Applications are not ready...")
-        scale_up_applications(axn)
+    all_deps_awake = Enum.all?(deps, fn dep -> not SleepSchedule.is_sleeping?(dep) end)
 
-      {:error, [error | _]} ->
-        Logger.error("Failed to check application status: #{inspect(error)}")
-        set_condition(axn, "Error", true, "ApplicationNotFound", error.message)
+    if not all_deps_awake do
+      Logger.debug("Dependencies not yet awake, triggering wakes...")
 
-      {:error, error} ->
-        Logger.error("Failed to check applications status: #{inspect(error)}")
-        axn
+      Enum.each(deps, fn dep ->
+        if SleepSchedule.is_sleeping?(dep), do: Drowzee.K8s.trigger_dependency_wake(dep)
+      end)
+
+      axn
+    else
+      case check_application_status(axn, &application_status_ready?/3) do
+        {:ok, true} ->
+          Logger.debug("All applications are ready")
+
+          axn
+          |> wake_up_ingress()
+          |> complete_wake_up_transition(opts)
+
+        {:ok, false} ->
+          Logger.debug("Applications are not ready...")
+          scale_up_applications(axn)
+
+        {:error, [error | _]} ->
+          Logger.error("Failed to check application status: #{inspect(error)}")
+          set_condition(axn, "Error", true, "ApplicationNotFound", error.message)
+
+        {:error, error} ->
+          Logger.error("Failed to check applications status: #{inspect(error)}")
+          axn
+      end
     end
   end
 
@@ -518,7 +583,7 @@ defmodule Drowzee.Controller.SleepScheduleController do
   end
 
   defp normalize_resource_result({:ok, resources}), do: {:ok, resources}
-  defp normalize_resource_result({:partial, found_resources, missing_resources}) do
+  defp normalize_resource_result({:partial, _found_resources, missing_resources}) do
     missing_names = Enum.map(missing_resources, fn r -> "#{r["kind"]}/#{r["name"]}" end)
     Logger.warning("Some resources not found: #{Enum.join(missing_names, ", ")}")
     {:error, missing_resources}
@@ -611,6 +676,88 @@ defmodule Drowzee.Controller.SleepScheduleController do
 
         axn
     end
+  end
+
+  defp validate_priority_groups(%Bonny.Axn{} = axn) do
+    resource = axn.resource
+    priority_groups = resource["spec"]["priorityGroups"] || []
+
+    # Skip validation if no priorityGroups defined or if Error already set
+    has_error =
+      case get_condition(axn, "Error") do
+        {:ok, %{"status" => "True"}} -> true
+        _ -> false
+      end
+
+    if Enum.empty?(priority_groups) or has_error do
+      axn
+    else
+      group_names = Enum.map(priority_groups, & &1["name"])
+
+      # Collect all priority references from resources
+      all_resources =
+        (resource["spec"]["deployments"] || []) ++
+          (resource["spec"]["statefulsets"] || []) ++
+          (resource["spec"]["cronjobs"] || [])
+
+      priority_refs =
+        all_resources
+        |> Enum.map(& &1["priority"])
+        |> Enum.reject(&is_nil/1)
+        |> Enum.uniq()
+
+      errors =
+        []
+        |> validate_unique_group_names(group_names)
+        |> validate_priority_refs(priority_refs, group_names)
+        |> validate_timeout_values(priority_groups)
+
+      case errors do
+        [] ->
+          axn
+
+        errors ->
+          reason = Enum.join(errors, "; ")
+          Logger.warning("Invalid priorityGroups: #{reason}")
+          set_condition(axn, "Error", true, "InvalidPriorityGroups", reason)
+      end
+    end
+  end
+
+  defp validate_unique_group_names(errors, group_names) do
+    if length(group_names) != length(Enum.uniq(group_names)) do
+      ["Duplicate group names" | errors]
+    else
+      errors
+    end
+  end
+
+  defp validate_priority_refs(errors, priority_refs, group_names) do
+    invalid = Enum.reject(priority_refs, &(&1 in group_names))
+
+    if Enum.any?(invalid) do
+      ["Unknown priority references: #{Enum.join(invalid, ", ")}" | errors]
+    else
+      errors
+    end
+  end
+
+  defp validate_timeout_values(errors, priority_groups) do
+    Enum.reduce(priority_groups, errors, fn pg, acc ->
+      timeout = pg["timeoutSeconds"] || 0
+      wait_for_ready = pg["waitForReady"] || false
+
+      cond do
+        timeout < 0 ->
+          ["timeoutSeconds < 0 for group '#{pg["name"]}'" | acc]
+
+        wait_for_ready and timeout <= 0 ->
+          ["waitForReady requires timeoutSeconds > 0 for group '#{pg["name"]}'" | acc]
+
+        true ->
+          acc
+      end
+    end)
   end
 
   # Helper function to remove manual override
