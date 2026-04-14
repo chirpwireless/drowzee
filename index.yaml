@@ -1,0 +1,104 @@
+apiVersion: v1
+entries:
+  drowzee:
+  - apiVersion: v2
+    appVersion: 2026.414.20465-2a197f2
+    created: "2026-04-14T20:47:59.009611798Z"
+    description: A Helm chart for the Drowzee operator
+    digest: 7bed02338429fe22a349cc9ad08ee18afc054d9445b184ecfb1aba43619f9653
+    name: drowzee
+    type: application
+    urls:
+    - https://chirpwireless.github.io/drowzee/drowzee-1.3.2.tgz
+    version: 1.3.2
+  - apiVersion: v2
+    appVersion: 2026.414.20957-7601f0f
+    created: "2026-04-14T20:47:59.009120922Z"
+    description: A Helm chart for the Drowzee operator
+    digest: 73fe20ce817bd5545a1c8e7d16bc20ef2044ebb5cd18b88c6af38fb9a7ede684
+    name: drowzee
+    type: application
+    urls:
+    - https://chirpwireless.github.io/drowzee/drowzee-1.3.1.tgz
+    version: 1.3.1
+  - apiVersion: v2
+    appVersion: 2026.413.183522-880a833
+    created: "2026-04-14T20:47:59.008631508Z"
+    description: A Helm chart for the Drowzee operator
+    digest: 01e6eb6e3f01d385765b628fff130a1ab1552f536772cd49cce2e794cd3c4b3e
+    name: drowzee
+    type: application
+    urls:
+    - https://chirpwireless.github.io/drowzee/drowzee-1.3.0.tgz
+    version: 1.3.0
+  - apiVersion: v2
+    appVersion: 2026.320.204822-09a0a5c
+    created: "2026-04-14T20:47:59.008137325Z"
+    description: A Helm chart for the Drowzee operator
+    digest: a3f82d611fd7c76b9c463699a4502836497a161389f10610b854a76736d600fd
+    name: drowzee
+    type: application
+    urls:
+    - https://chirpwireless.github.io/drowzee/drowzee-1.2.2.tgz
+    version: 1.2.2
+  - apiVersion: v2
+    appVersion: 2025.81.91631-a62258b
+    created: "2026-04-14T20:47:59.007623175Z"
+    description: A Helm chart for the Drowzee operator
+    digest: 4122e6ffb2ed2dc089a70a2e16d8203ee74ae8e5e722fee6b7531eef77088495
+    name: drowzee
+    type: application
+    urls:
+    - https://chirpwireless.github.io/drowzee/drowzee-1.2.1.tgz
+    version: 1.2.1
+  - apiVersion: v2
+    appVersion: 2025.728.7405-0deb70d
+    created: "2026-04-14T20:47:59.007134362Z"
+    description: A Helm chart for the Drowzee operator
+    digest: 06e6fb6843e530214aee82fd091618942d9324633e7d15d3cf93d764d875c2a5
+    name: drowzee
+    type: application
+    urls:
+    - https://chirpwireless.github.io/drowzee/drowzee-1.2.0.tgz
+    version: 1.2.0
+  - apiVersion: v2
+    appVersion: 2025.79.183612-6642e08
+    created: "2026-04-14T20:47:59.006364202Z"
+    description: A Helm chart for the Drowzee operator
+    digest: a95f993369fe04703de6adb479869b6e6699a97c46b08e1dead90da178618855
+    name: drowzee
+    type: application
+    urls:
+    - https://chirpwireless.github.io/drowzee/drowzee-1.1.0.tgz
+    version: 1.1.0
+  - apiVersion: v2
+    appVersion: 2025.721.72854-6642e08-release-1-2-0
+    created: "2026-04-14T20:47:59.005277716Z"
+    description: A Helm chart for the Drowzee operator
+    digest: ef6cd56a1afb5f3cdf16159891b9068d0d0ca6ece157193932a8bbb48ddbb786
+    name: drowzee
+    type: application
+    urls:
+    - https://chirpwireless.github.io/drowzee/drowzee-1.1.0-2025.721.72854-6642e08-release-1-2-0.tgz
+    version: 1.1.0-2025.721.72854-6642e08-release-1-2-0
+  - apiVersion: v2
+    appVersion: 2025.626.95835-995dcdf
+    created: "2026-04-14T20:47:59.004670381Z"
+    description: A Helm chart for the Drowzee operator
+    digest: 2e3f13612396b5606f7d86504954fd008d85495cbf7ff28fa8d2cb52bf1babdc
+    name: drowzee
+    type: application
+    urls:
+    - https://chirpwireless.github.io/drowzee/drowzee-1.0.0.tgz
+    version: 1.0.0
+  - apiVersion: v2
+    appVersion: 2025.626.94817-a63fb14
+    created: "2026-04-14T20:47:59.00417676Z"
+    description: A Helm chart for the Drowzee operator
+    digest: f2d0f1112d2fc11a920d81c72e80079b111f84b030ae7559c38d5e75e1f31dee
+    name: drowzee
+    type: application
+    urls:
+    - https://chirpwireless.github.io/drowzee/drowzee-0.2.0.tgz
+    version: 0.2.0
+generated: "2026-04-14T20:47:59.003519021Z"
