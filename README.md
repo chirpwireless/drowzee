@@ -167,6 +167,10 @@ helm uninstall drowzee
 
 For a description of the conditions used to determine the sleep schedule status see [Sleep Schedule Status](SleepScheduleStatus.md).
 
+## UI Preview
+
+A static mockup of the web UI is available at [docs/ui-mockup.html](docs/ui-mockup.html) — open in a browser to see the schedule list and detail views.
+
 ## Acknowledgements
 
 This project was inspired by [Snorlax](https://github.com/moonbeam-nyc/snorlax). Unfortunately I had issues while trying to run Snorlax and wanted to address some of those by creating my own operator. The main areas of improvement were:
