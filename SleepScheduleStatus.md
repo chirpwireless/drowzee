@@ -1,64 +1,69 @@
 # SleepSchedule CRD Conditions
 
-The `SleepSchedule` Custom Resource Definition (CRD) manages the sleeping and waking of Kubernetes deployments based on a defined schedule or manual triggers. To track the current state of the system and operations, the CRD uses a set of standardized conditions stored in its `status` field.
-
-This document describes the conditions used and how they reflect the state of the system.
+The `SleepSchedule` CRD manages sleeping and waking of Kubernetes Deployments, StatefulSets, and CronJobs based on a schedule or manual triggers. State is tracked via conditions in the `status` field.
 
 ---
 
 ## Conditions Overview
 
-The `SleepSchedule` CRD uses four conditions:
-
-| **Condition**          | **Description**                                        | **Possible Values** | **Reason Examples**                    |
-|------------------------|--------------------------------------------------------|---------------------|----------------------------------------|
-| `Sleeping`             | Indicates whether the system is asleep.                | `True` / `False`    | `ScheduledSleep`, `ManualSleep`, `ScheduledWakeUp`, `ManualWakeUp` |
-| `Transitioning`        | Indicates if a sleep or wake operation is in progress. | `True` / `False`    | `Sleeping`, `WakingUp`, `NoTransition` |
-| `ManualOverride`       | Indicates if the current state was triggered manually. | `True` / `False`    | `Sleep`, `WakeUp`, `NoOverride`        |
-| `Error`                | Captures failures during operations.                   | `True` / `False`    | `ScaleFailed`, `IngressUpdateFailed`, `NoError` |
+| **Condition**    | **Description**                               | **Values**       | **Reason Examples**                                                |
+| ---------------- | --------------------------------------------- | ---------------- | ------------------------------------------------------------------ |
+| `Sleeping`       | Whether resources are asleep                  | `True` / `False` | `ScheduledSleep`, `ManualSleep`, `ScheduledWakeUp`, `ManualWakeUp` |
+| `Transitioning`  | Whether a sleep/wake operation is in progress | `True` / `False` | `Sleeping`, `WakingUp`, `NoTransition`                             |
+| `ManualOverride` | Whether current state was triggered manually  | `True` / `False` | `Sleep`, `WakeUp`, `NoOverride`                                    |
+| `Error`          | Whether the last operation failed             | `True` / `False` | `ScaleFailed`, `IngressUpdateFailed`, `NoError`                    |
+| `Heartbeat`      | Toggled periodically by TransitionMonitor     | `True` / `False` | `StayingAlive`                                                     |
 
 ---
 
 ## Condition Details
 
 ### `Sleeping`
-- **True**: The specified deployments are scaled down and the ingress is modified to show the sleep page.
-- **False**: The deployments are running and ingress is in its original state.
+
+- **True**: Deployments/StatefulSets scaled to 0, CronJobs suspended, ingress redirected to sleep page.
+- **False**: Resources running at original replica counts, ingress in original state.
 - **Reasons**:
-  - `ScheduledSleep`: Sleep was initiated by the schedule.
-  - `ManualSleep`: Sleep was manually triggered.
-  - `ScheduledWakeUp`: Wake was initiated by the schedule.
-  - `ManualWakeUp`: Wake was manually triggered.
-  - `InitialValue`: Initial value set for a new sleep schedule.
+  - `ScheduledSleep`: Sleep initiated by schedule.
+  - `ManualSleep`: Sleep manually triggered.
+  - `ScheduledWakeUp`: Wake initiated by schedule.
+  - `ManualWakeUp`: Wake manually triggered.
+  - `InitialValue`: Initial value for a new schedule.
 
 ### `Transitioning`
-- **True**: A sleep or wake operation is in progress.
+
+- **True**: A sleep or wake operation is in progress (possibly across multiple priority groups).
 - **False**: No ongoing operations.
 - **Reasons**:
-  - `Sleeping`: Deployments are going to sleep.
-  - `WakingUp`: Deployments are waking up.
-  - `NoTransition`: No transition operation in progress.
+  - `Sleeping`: Resources going to sleep.
+  - `WakingUp`: Resources waking up.
+  - `NoTransition`: No transition in progress.
 
 ### `ManualOverride`
-- **True**: The current sleeping or awake state was triggered manually. 
-- **False**: The state was set by the schedule.
+
+- **True**: Current state was triggered manually via the web UI.
+- **False**: State was set by the schedule.
 - **Reasons**:
-  - `WakeUp`: Manual wake up action requested the user.
-  - `Sleep`: Manual sleep action requested the user.
-  - `NoOverride`: No manual intervention present.
+  - `WakeUp`: Manual wake-up requested.
+  - `Sleep`: Manual sleep requested.
+  - `NoOverride`: No manual intervention.
 
 ### `Error`
+
 - **True**: The last operation failed.
-- **False**: No errors occurred in the most recent operation.
+- **False**: No errors in the most recent operation.
 - **Reasons**:
-  - `ScaleFailed`: Failed to scale deployments.
+  - `ScaleFailed`: Failed to scale Deployments/StatefulSets or suspend CronJobs.
   - `IngressSleepFailed`: Failed to update ingress to sleep page.
-  - `IngressWakeUpFailed`: Failed to restore ingress to original state.
+  - `IngressWakeUpFailed`: Failed to restore ingress.
   - `NoError`: No errors present.
+
+### `Heartbeat`
+
+Toggled by `TransitionMonitor` to trigger reconciliation events for schedules that are mid-transition. Not meaningful for end users.
 
 ---
 
-## Example Status with Conditions
+## Example Status
 
 ```yaml
 status:
@@ -67,52 +72,70 @@ status:
       status: "True"
       lastTransitionTime: "2025-02-21T23:00:00Z"
       reason: ScheduledSleep
-      message: "Deployments have been scaled down and ingress updated."
+      message: "Resources have been scaled down and ingress updated."
 
     - type: Transitioning
       status: "False"
       lastTransitionTime: "2025-02-21T23:01:00Z"
       reason: NoTransition
-      message: "No transition in progress."
 
     - type: ManualOverride
       status: "False"
       lastTransitionTime: "2025-02-21T23:02:00Z"
       reason: NoManualOverride
-      message: "No manual override present."
 
     - type: Error
       status: "False"
       lastTransitionTime: "2025-02-21T23:01:00Z"
       reason: NoError
+
+    - type: Heartbeat
+      status: "True"
+      lastTransitionTime: "2025-02-21T23:05:00Z"
+      reason: StayingAlive
 ```
 
 ---
 
-## Condition Lifecycle Overview
+## Condition Lifecycle
 
 ### Sleep Flow (Scheduled)
+
 1. Set `Transitioning=True` with `reason=Sleeping`.
-2. Scale down deployments and update ingress.
-3. Set `Sleeping=True`, `Transitioning=False` with `reason=ScheduledSleep`.
+2. For each priority group (in reverse order, or all at once if no groups defined):
+   - Scale down Deployments/StatefulSets to 0, suspend CronJobs.
+   - Wait (fixed timeout or poll readiness) before next group.
+3. Update ingress to redirect to Drowzee.
+4. Set `Sleeping=True`, `Transitioning=False` with `reason=ScheduledSleep`.
 
 ### Wake Flow (Manual)
-1. User triggers wake via web endpoint.
+
+1. User triggers wake via web UI.
 2. Set `ManualOverride=True` and `Transitioning=True` with `reason=ManualWakeUp`.
-3. Scale up deployments and restore ingress.
-4. Set `Sleeping=False`, `Transitioning=False` with `reason=ManualWakeUp`.
-5. Set `ManualOverride=False`.
+3. If the schedule has `needs`, wake dependencies first.
+4. For each priority group (in defined order):
+   - Scale up Deployments/StatefulSets to original replicas, resume CronJobs.
+   - Wait (fixed timeout or poll readiness) before next group.
+5. Restore ingress to original state.
+6. Set `Sleeping=False`, `Transitioning=False` with `reason=ManualWakeUp`.
+7. `ManualOverride` is automatically cleared at the next scheduled event (sleep or wake).
+
+### Wake Flow (Scheduled)
+
+Same as manual but without `ManualOverride`. Does not trigger if `onDemand: true`.
 
 ### Error Handling
-- If an error occurs during sleep or wake:
-  - Set `Error=True` with an appropriate `reason` and `message`.
+
+- On error during sleep or wake:
+  - Set `Error=True` with appropriate `reason` and `message`.
   - `Transitioning=False` indicates the operation stopped.
+  - Per-resource errors are also recorded as annotations on the affected resources.
 
 ---
 
 ## Notes
-- `lastTransitionTime` reflects when the condition last changed.
-- `Transitioning=True` indicates in-progress operations and should be `False` otherwise.
-- `ManualOverride=True` persists until the next scheduled state change unless cleared.
-- `Error=True` should reset to `False` after a successful subsequent operation.
 
+- `lastTransitionTime` reflects when the condition last changed.
+- `ManualOverride=True` persists until the next scheduled state change.
+- `Error=True` resets to `False` after a successful subsequent operation.
+- With `onDemand: true`, the schedule auto-sleeps but does not auto-wake.

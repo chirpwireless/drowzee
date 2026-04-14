@@ -59,3 +59,34 @@ spec:
   cronjobs:
     - name: non-prod-backup
   ingressName: non-prod-service
+---
+apiVersion: drowzee.challengr.io/v1beta1
+kind: SleepSchedule
+metadata:
+  name: priority-groups-example
+spec:
+  sleepTime: "22:00"
+  wakeTime: "08:00"
+  dayOfWeek: "mon-fri"
+  timezone: "Australia/Sydney"
+  priorityGroups:
+    - name: database
+      timeoutSeconds: 120
+      waitForReady: true
+    - name: app
+      timeoutSeconds: 60
+      waitForReady: true
+    - name: background
+      timeoutSeconds: 10
+  deployments:
+    - name: api-server
+      priority: app
+    - name: web-frontend
+      priority: app
+  statefulsets:
+    - name: postgresql
+      priority: database
+  cronjobs:
+    - name: cleanup-job
+      priority: background
+  ingressName: api-server

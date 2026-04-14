@@ -4,12 +4,80 @@
 
 # Drowzee
 
-Drowzee is a K8s operator to put deployments to sleep (scaled down), and wake them up (scaled up), according to a sleep schedule.
+Drowzee is a K8s operator that scales down Deployments, StatefulSets and suspends CronJobs on a schedule — and brings them back up when it's time. Saves costs by sleeping non-prod workloads outside working hours.
 
-Drowzee comes with a web interface that allows you to view sleep schedules, their current status and even manually override the schedule to wake up deployments when required. 
+Comes with a Phoenix LiveView web UI for viewing schedules, status, and manual overrides. Supports ingress redirection so users hitting a sleeping service get the Drowzee UI instead.
 
-Drowzee also supports redirecting the ingress record of a sleeping deployment to drowzee so that users can easily manage the deployment and the sleep schedule from the same interface.
+## SleepSchedule
 
+A `SleepSchedule` is a custom resource that defines what to sleep and when.
+
+### Basic example
+
+```yaml
+apiVersion: drowzee.challengr.io/v1beta1
+kind: SleepSchedule
+metadata:
+  name: my-app
+spec:
+  sleepTime: "10:00pm"
+  wakeTime: "09:00am"
+  dayOfWeek: "mon-fri"
+  timezone: "Australia/Sydney"
+  deployments:
+    - name: my-service
+    - name: my-worker
+  statefulsets:
+    - name: my-database
+  cronjobs:
+    - name: my-backup
+  ingressName: my-service
+```
+
+### Priority groups
+
+Control the order resources wake up and sleep. Wake-up follows the defined order; sleep is reversed.
+
+```yaml
+spec:
+  priorityGroups:
+    - name: database
+      timeoutSeconds: 120
+      waitForReady: true # polls readiness before proceeding
+    - name: app
+      timeoutSeconds: 60
+      waitForReady: true
+    - name: background
+      timeoutSeconds: 10
+      waitForReady: false # fixed wait, no readiness check
+
+  deployments:
+    - name: my-service
+      priority: app
+  statefulsets:
+    - name: my-database
+      priority: database
+  cronjobs:
+    - name: my-backup
+      priority: background
+```
+
+Resources without a `priority` field go into an implicit default group at the end.
+
+### Dependencies
+
+A schedule can depend on other schedules via `needs`. Dependencies are woken first during manual wake-up.
+
+```yaml
+spec:
+  needs:
+    - name: infra-schedule
+      namespace: shared
+```
+
+### On-demand mode
+
+With `onDemand: true`, the schedule auto-sleeps at `sleepTime` but does **not** auto-wake. Wake-up is manual only.
 
 ### Installation / Upgrade
 
@@ -21,11 +89,11 @@ helm upgrade --install drowzee drowzee/drowzee --namespace default -f values.yam
 
 ## Configuration
 
-Drowzee can either run in a single namespace or cluster mode. 
+Drowzee can either run in a single namespace or cluster mode.
 
-In single namespace mode, Drowzee will only detect sleep schedules and manage deployments in the same namespace as the Drowzee deployment.
+In single namespace mode, Drowzee will only detect sleep schedules and manage resources in the same namespace as the Drowzee deployment.
 
-In cluster mode, Drowzee will detect sleep schedules and manage deployments in multiple namespaces.
+In cluster mode, Drowzee will detect sleep schedules and manage resources across multiple namespaces.
 
 ### Single namespace
 
@@ -77,7 +145,7 @@ ingress:
 
 ### Resources
 
-Drowzee is reasonably light weight but really depends on the number of sleep schedules and the number of deployments that are being managed. `100m` CPU and `256Mi` memory is a safe starting point.
+Drowzee is reasonably light weight but really depends on the number of sleep schedules and the number of resources being managed. `100m` CPU and `256Mi` memory is a safe starting point.
 
 ```yaml
 resources:
@@ -95,7 +163,6 @@ resources:
 helm uninstall drowzee
 ```
 
-
 ## Sleep Schedule Status
 
 For a description of the conditions used to determine the sleep schedule status see [Sleep Schedule Status](SleepScheduleStatus.md).
@@ -103,9 +170,10 @@ For a description of the conditions used to determine the sleep schedule status 
 ## Acknowledgements
 
 This project was inspired by [Snorlax](https://github.com/moonbeam-nyc/snorlax). Unfortunately I had issues while trying to run Snorlax and wanted to address some of those by creating my own operator. The main areas of improvement were:
+
 - A simplier approach to managing ingresses
-  - Drowzee uses a single annotation to redirect traffic rather than re-writing the whole ingress record. 
-  - The downside it that Drowzee currently only supports Nginx ingress controllers. 
+  - Drowzee uses a single annotation to redirect traffic rather than re-writing the whole ingress record.
+  - The downside it that Drowzee currently only supports Nginx ingress controllers.
 - More explicit wake up
   - Snorlax immediately wakes up a deployment whenever the ingress receives a request.
   - Drowzee requires the user to click the wake up button. This avoids unexpected wakeups.
